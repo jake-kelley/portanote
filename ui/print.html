@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Export</title>
+<link rel="stylesheet" href="/vendor/hljs-github.min.css">
+<script src="/vendor/marked.min.js"></script>
+<script src="/vendor/purify.min.js"></script>
+<script src="/vendor/highlight.min.js"></script>
+<style>
+/* Eisvogel-inspired print styling. True Eisvogel output comes from the
+   pandoc path; this view aims for the same feel via the browser's
+   print-to-PDF: title page with the signature rule, clean sans body,
+   listings-style code blocks, booktabs-style tables, page numbers. */
+:root{ --eis-rule:#435488; --ink:#222; --muted:#5b5b5b; }
+*{box-sizing:border-box;}
+body{margin:0;color:var(--ink);
+  font-family:"Source Sans Pro","Segoe UI",-apple-system,BlinkMacSystemFont,Roboto,"Helvetica Neue",sans-serif;
+  font-size:11pt;line-height:1.5;}
+
+@page{
+  size:letter;
+  margin:23mm 21mm 25mm 21mm;
+  @bottom-left{ content:string(doctitle); font-size:8.5pt; color:var(--muted); }
+  @bottom-right{ content:counter(page); font-size:8.5pt; color:var(--muted); }
+}
+@page:first{
+  @bottom-left{ content:none; }
+  @bottom-right{ content:none; }
+}
+
+#printBtn{position:fixed;top:14px;right:14px;z-index:10;background:var(--eis-rule);color:#fff;
+  border:none;border-radius:8px;padding:10px 16px;font-size:14px;cursor:pointer;
+  box-shadow:0 2px 10px rgba(0,0,0,.25);font-family:inherit;}
+#printBtn:hover{filter:brightness(1.15);}
+
+.titlepage{page-break-after:always;padding-top:26%;}
+.titlepage .rule{height:4pt;background:var(--eis-rule);margin-bottom:26pt;}
+.titlepage h1{font-size:26pt;font-weight:700;margin:0 0 8pt 0;line-height:1.2;
+  string-set:doctitle content(text);}
+.titlepage .subtitle{font-size:13pt;color:var(--muted);margin:0 0 4pt 0;}
+.titlepage .date{font-size:11pt;color:var(--muted);margin-top:40pt;}
+
+article h1,article h2,article h3,article h4{font-weight:700;line-height:1.25;color:#111;
+  margin:1.35em 0 .45em 0;page-break-after:avoid;}
+article h1{font-size:17pt;}
+article h2{font-size:13.5pt;}
+article h3{font-size:11.5pt;}
+article p{margin:.55em 0;}
+article a{color:#2a5aa5;text-decoration:none;}
+article code{font-family:"Source Code Pro",Consolas,Menlo,monospace;font-size:9.5pt;
+  background:#f5f5f5;border-radius:2px;padding:0 3px;}
+article pre{background:#f7f7f7;border:.5pt solid #e0e0e0;border-radius:3pt;
+  padding:8pt 10pt;overflow-x:auto;page-break-inside:avoid;}
+article pre code{background:none;padding:0;font-size:8.8pt;line-height:1.45;display:block;}
+article blockquote{border-left:2.5pt solid #b9b9b9;margin:.8em 0;padding:.1em 0 .1em 12pt;
+  color:#555;font-style:italic;}
+article table{border-collapse:collapse;margin:.9em 0;font-size:10pt;width:100%;}
+article th{border-top:1.2pt solid #333;border-bottom:.8pt solid #333;padding:4pt 8pt;text-align:left;}
+article td{border-bottom:.4pt solid #ccc;padding:4pt 8pt;vertical-align:top;}
+article tr:last-child td{border-bottom:1.2pt solid #333;}
+article img{max-width:100%;}
+article hr{border:none;border-top:.5pt solid #999;margin:1.5em 0;}
+article ul,article ol{padding-left:22pt;margin:.5em 0;}
+article li{margin:.15em 0;}
+
+@media screen{
+  body{background:#525659;}
+  .page-sim{background:#fff;max-width:820px;margin:24px auto;padding:60px 70px;
+    box-shadow:0 4px 24px rgba(0,0,0,.4);min-height:1000px;}
+  .titlepage{min-height:75vh;}
+}
+@media print{
+  #printBtn{display:none;}
+  .page-sim{padding:0;margin:0;box-shadow:none;}
+}
+</style>
+</head>
+<body>
+<button id="printBtn">🖨&nbsp; Print / Save as PDF</button>
+<div class="page-sim">
+  <div class="titlepage" id="titlepage">
+    <div class="rule"></div>
+    <h1 id="ptitle"></h1>
+    <p class="subtitle" id="psubtitle"></p>
+    <p class="date" id="pdate"></p>
+  </div>
+  <article id="content"></article>
+</div>
+<script>
+(async () => {
+  const id = decodeURIComponent(location.pathname.split("/").pop());
+  const r = await fetch("/api/notes/" + encodeURIComponent(id));
+  if (!r.ok) { document.body.textContent = "Note not found."; return; }
+  const n = await r.json();
+
+  document.title = n.title || "Untitled";
+  document.getElementById("ptitle").textContent = n.title || "Untitled";
+  document.getElementById("psubtitle").textContent = (n.tags || []).join("  ·  ");
+  document.getElementById("pdate").textContent = new Date(n.updated)
+    .toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+
+  marked.use({ gfm: true, breaks: true });
+  const html = DOMPurify.sanitize(marked.parse(n.body || ""));
+  const article = document.getElementById("content");
+  article.innerHTML = html;
+  article.querySelectorAll("pre code").forEach((el) => hljs.highlightElement(el));
+
+  document.getElementById("printBtn").addEventListener("click", () => window.print());
+  // give fonts/highlighting a beat, then open the dialog automatically
+  setTimeout(() => window.print(), 500);
+})();
+</script>
+</body>
+</html>

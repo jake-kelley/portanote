@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Portanote</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📝</text></svg>">
+<link rel="stylesheet" href="vendor/hljs-github.min.css" id="hljsLight">
+<link rel="stylesheet" href="vendor/hljs-github-dark.min.css" id="hljsDark" disabled>
+<link rel="stylesheet" href="app.css">
+<script defer src="vendor/marked.min.js"></script>
+<script defer src="vendor/purify.min.js"></script>
+<script defer src="vendor/highlight.min.js"></script>
+<script defer src="app.js"></script>
+</head>
+<body>
+<div id="app">
+
+  <aside id="sidebar">
+    <div class="side-head">
+      <span class="logo">📝</span><b>Portanote</b>
+    </div>
+    <div class="side-scroll">
+      <div class="side-section">Views</div>
+      <nav id="views">
+        <a data-view="all"><span class="vicon">📄</span>Notes<span class="count" id="cAll"></span></a>
+        <a data-view="starred"><span class="vicon">⭐</span>Starred<span class="count" id="cStarred"></span></a>
+        <a data-view="untagged"><span class="vicon">✂️</span>Untagged<span class="count" id="cUntagged"></span></a>
+        <a data-view="trash"><span class="vicon">🗑️</span>Trash<span class="count" id="cTrash"></span></a>
+      </nav>
+      <div class="side-section side-head-row">Folders
+        <button class="add-btn" id="newFolderBtn" title="New folder">+</button>
+      </div>
+      <nav id="folderlist"></nav>
+      <div class="side-section">Tags</div>
+      <nav id="taglist"></nav>
+    </div>
+    <div class="side-foot">
+      <button id="themeBtn" title="Toggle dark mode">🌙</button>
+      <span id="pdfBadge" class="badge" title="">PDF: …</span>
+      <span class="ver" id="verLabel"></span>
+    </div>
+  </aside>
+
+  <section id="listpane">
+    <header class="list-head">
+      <h2 id="listTitle">Notes</h2>
+      <select id="sortSel" title="Sort order">
+        <option value="updated">Modified</option>
+        <option value="created">Created</option>
+        <option value="title">Title</option>
+      </select>
+      <button id="newBtn" title="New note (Ctrl+Alt+N)">+</button>
+    </header>
+    <div class="searchwrap">
+      <input id="search" type="search" placeholder="Search…  (Ctrl+K)" autocomplete="off">
+    </div>
+    <div id="notelist"></div>
+  </section>
+
+  <section id="editor">
+    <div id="emptyState">
+      <div class="empty-icon">📝</div>
+      <p><b>Select a note</b> or create a new one.</p>
+      <p class="hints">
+        <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>N</kbd> new note &nbsp;·&nbsp;
+        <kbd>Ctrl</kbd>+<kbd>K</kbd> search &nbsp;·&nbsp;
+        <kbd>Ctrl</kbd>+<kbd>E</kbd> cycle edit/split/preview
+      </p>
+    </div>
+
+    <div id="editorMain" hidden>
+      <div id="trashBanner" hidden>
+        This note is in the Trash.
+        <button id="restoreBtn">Restore</button>
+        <button id="purgeBtn" class="danger">Delete forever</button>
+      </div>
+
+      <input id="title" placeholder="Untitled" autocomplete="off">
+
+      <div id="folderrow">
+        <span class="folder-ic">📁</span>
+        <select id="folderSel" title="Move to folder"></select>
+      </div>
+
+      <div id="tagrow">
+        <span id="tagchips"></span>
+        <input id="tagInput" list="tagOptions" placeholder="Add tag…" autocomplete="off">
+        <datalist id="tagOptions"></datalist>
+      </div>
+
+      <div id="toolbar">
+        <div class="tb-group">
+          <button data-md="bold" title="Bold (Ctrl+B)"><b>B</b></button>
+          <button data-md="italic" title="Italic (Ctrl+I)"><i>I</i></button>
+          <button data-md="code" title="Code (Ctrl+`)">&lt;/&gt;</button>
+          <button data-md="link" title="Link (Ctrl+L)">🔗</button>
+          <button data-md="h2" title="Heading">H</button>
+          <button data-md="ul" title="Bullet list">≔</button>
+          <button data-md="quote" title="Quote">❝</button>
+        </div>
+        <div class="tb-group seg" id="modeSeg">
+          <button data-mode="edit">Edit</button>
+          <button data-mode="split">Split</button>
+          <button data-mode="preview">Preview</button>
+        </div>
+        <div class="tb-group right">
+          <button id="starBtn" title="Star">☆</button>
+          <details id="exportMenu">
+            <summary title="Export">⤓</summary>
+            <div class="menu">
+              <button id="exPrint">🖨&nbsp; Print / Save as PDF <span class="mhint">built-in</span></button>
+              <button id="exEisvogel">📄&nbsp; Eisvogel PDF <span class="mhint">pandoc</span></button>
+              <button id="exEisvogelToc">📑&nbsp; Eisvogel PDF + TOC <span class="mhint">pandoc</span></button>
+              <div id="exNote" class="mnote" hidden>Drop pandoc + tectonic into <code>tools/</code> to enable Eisvogel export (see README)</div>
+            </div>
+          </details>
+          <button id="trashBtn" title="Move to trash">🗑</button>
+        </div>
+      </div>
+
+      <div id="panes" class="mode-split">
+        <textarea id="mdtext" spellcheck="false" placeholder="Write markdown here…"></textarea>
+        <div id="preview" class="markdown"></div>
+      </div>
+
+      <footer id="statusbar">
+        <span id="stats"></span>
+        <span id="noteDates"></span>
+        <span id="saveState"></span>
+      </footer>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>
