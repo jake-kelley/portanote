@@ -2,7 +2,11 @@
 
 A portable, Standard Notes–style markdown notes app in a **single ~7 MB binary**. No installation, no admin rights, no Electron — the binary serves a local web UI to your default browser, and your notes are plain `.md` files sitting next to it.
 
-- **Three-pane UI** like Standard Notes: views + tags sidebar · searchable note list · markdown editor with live preview (edit / split / preview), dark mode, starring, trash.
+![Portanote — three-pane UI with folders, tags, and a split markdown editor](docs/screenshot.png)
+
+<sub>Light mode above; a dark theme is built in too ([screenshot](docs/screenshot-dark.png)).</sub>
+
+- **Three-pane UI** like Standard Notes: folders + tags sidebar · searchable note list · markdown editor with live preview (edit / split / preview), dark mode, starring, trash.
 - **Fast search-as-you-type**: in-memory BM25 full-text index with prefix matching and title/tag boosting, plus substring fallback. Instant at personal-collection scale.
 - **Eisvogel PDF export**, two ways:
   1. **Built-in (zero dependencies):** an Eisvogel-styled print view → browser *Save as PDF*. Works everywhere, immediately.
