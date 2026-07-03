@@ -10,7 +10,8 @@ const state = {
   view: "all",          // all | starred | untagged | trash
   tag: null,            // active tag filter (exclusive with view/folder)
   folder: null,         // active folder filter (exclusive with view/tag)
-  folders: [],          // ordered folder names
+  folders: [],          // all folder paths ("Work/Projects/Alpha")
+  collapsed: new Set(JSON.parse(localStorage.getItem("pn-folders-collapsed") || "[]")),
   q: "",
   results: null,        // search results when q is non-empty
   current: null,        // full Note being edited
@@ -25,7 +26,7 @@ const state = {
 /* ---------------------------------------------------------------- init */
 
 document.addEventListener("DOMContentLoaded", async () => {
-  marked.use({ gfm: true, breaks: true });
+  configureMarkdown();
   const themeParam = new URLSearchParams(location.search).get("theme");
   if (themeParam === "dark" || themeParam === "light") setTheme(themeParam === "dark");
   else if (localStorage.getItem("pn-theme") === "dark") setTheme(true);
@@ -50,8 +51,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     badge.title = "Print-to-PDF available. For true Eisvogel export, drop pandoc + tectonic into tools/ (see README).";
   }
 
+  // remember the last-used export toggles (title page defaults on, TOC off)
+  $("#optTitlepage").checked = localStorage.getItem("pn-export-titlepage") === "1";
+  $("#optToc").checked = localStorage.getItem("pn-export-toc") === "1";
+
   $("#sortSel").value = state.sort;
   bindEvents();
+  initResizers();
   renderAll();
 
   // deep link: /#<note-id> opens that note (and refresh keeps it open)
@@ -97,7 +103,7 @@ function visibleNotes() {
     list = [...state.notes];
   }
   list = list.filter((n) => {
-    if (state.folder) return !n.trashed && n.folder === state.folder;
+    if (state.folder) return !n.trashed && n.folder && (n.folder === state.folder || n.folder.startsWith(state.folder + "/"));
     if (state.tag) return !n.trashed && n.tags.includes(state.tag);
     switch (state.view) {
       case "starred":  return n.starred && !n.trashed;
@@ -126,13 +132,70 @@ function tagCounts() {
   return counts;
 }
 
-function folderCounts() {
+function folderDirectCounts() {
   const counts = {};
   for (const n of state.notes) {
     if (n.trashed || !n.folder) continue;
     counts[n.folder] = (counts[n.folder] || 0) + 1;
   }
   return counts;
+}
+
+function saveCollapsed() {
+  localStorage.setItem("pn-folders-collapsed", JSON.stringify([...state.collapsed]));
+}
+
+// nest the flat folder paths into a tree of {name, path, children:Map}
+function buildFolderTree() {
+  const root = { children: new Map() };
+  for (const path of state.folders) {
+    let node = root, acc = "";
+    for (const seg of path.split("/")) {
+      acc = acc ? acc + "/" + seg : seg;
+      if (!node.children.has(seg)) node.children.set(seg, { name: seg, path: acc, children: new Map() });
+      node = node.children.get(seg);
+    }
+  }
+  return root;
+}
+
+function sortedChildren(node) {
+  return [...node.children.values()].sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+}
+
+function subtreeCount(node, direct) {
+  let c = direct[node.path] || 0;
+  for (const k of node.children.values()) c += subtreeCount(k, direct);
+  return c;
+}
+
+// flat display rows honoring the collapsed set (for the sidebar)
+function folderRows() {
+  const direct = folderDirectCounts();
+  const rows = [];
+  const walk = (node, depth) => {
+    for (const c of sortedChildren(node)) {
+      const hasKids = c.children.size > 0;
+      const collapsed = state.collapsed.has(c.path);
+      rows.push({ path: c.path, name: c.name, depth, hasKids, collapsed, count: subtreeCount(c, direct) });
+      if (hasKids && !collapsed) walk(c, depth + 1);
+    }
+  };
+  walk(buildFolderTree(), 0);
+  return rows;
+}
+
+// every folder in tree order with depth (for the editor's move-to dropdown)
+function folderOrder() {
+  const out = [];
+  const walk = (node, depth) => {
+    for (const c of sortedChildren(node)) {
+      out.push({ path: c.path, name: c.name, depth });
+      walk(c, depth + 1);
+    }
+  };
+  walk(buildFolderTree(), 0);
+  return out;
 }
 
 /* ---------------------------------------------------------------- rendering */
@@ -153,14 +216,18 @@ function renderSidebar() {
   $$("#views a").forEach((a) =>
     a.classList.toggle("active", !state.tag && !state.folder && a.dataset.view === state.view));
 
-  // folders (manifest order; counts computed live, empty folders still show)
-  const fcounts = folderCounts();
+  // folder tree (collapsible; subtree-inclusive counts; empty folders still show)
   if (state.folders.length) {
-    $("#folderlist").innerHTML = state.folders.map((f) =>
-      `<a data-folder="${esc(f)}" class="${state.folder === f ? "active" : ""}">
-         <span class="ficon">📁</span><span class="fname">${esc(f)}</span>
-         <span class="count">${fcounts[f] || ""}</span>
-         <span class="folder-x" data-del="${esc(f)}" title="Delete folder">✕</span></a>`).join("");
+    $("#folderlist").innerHTML = folderRows().map((r) => {
+      const toggle = r.hasKids
+        ? `<span class="ftoggle" data-toggle="${esc(r.path)}">${r.collapsed ? "▸" : "▾"}</span>`
+        : `<span class="ftoggle empty"></span>`;
+      return `<a data-folder="${esc(r.path)}" class="frow ${state.folder === r.path ? "active" : ""}" style="padding-left:${8 + r.depth * 14}px">
+        ${toggle}<span class="ficon">📁</span><span class="fname">${esc(r.name)}</span>
+        <span class="count">${r.count || ""}</span>
+        <span class="fadd" data-add="${esc(r.path)}" title="Add subfolder">＋</span>
+        <span class="folder-x" data-del="${esc(r.path)}" title="Delete folder">✕</span></a>`;
+    }).join("");
   } else {
     $("#folderlist").innerHTML = `<div class="folder-empty">No folders yet — tap +</div>`;
   }
@@ -225,7 +292,8 @@ function renderEditor() {
 
   const eis = state.meta.eisvogel;
   $("#exEisvogel").disabled = !eis;
-  $("#exEisvogelToc").disabled = !eis;
+  $("#optTitlepage").disabled = !eis;
+  $("#optToc").disabled = !eis;
   $("#exNote").hidden = !!eis;
 }
 
@@ -237,8 +305,9 @@ function renderTagChips() {
 function renderFolderSelect() {
   const cur = state.current.folder || "";
   const opts = [`<option value="">(no folder)</option>`];
-  for (const f of state.folders) {
-    opts.push(`<option value="${esc(f)}" ${f === cur ? "selected" : ""}>${esc(f)}</option>`);
+  for (const f of folderOrder()) {
+    const indent = "  ".repeat(f.depth);
+    opts.push(`<option value="${esc(f.path)}" ${f.path === cur ? "selected" : ""}>${indent}${esc(f.name)}</option>`);
   }
   // a note may sit in a folder that isn't in the manifest (hand-edited) — show it
   if (cur && !state.folders.includes(cur)) {
@@ -248,10 +317,20 @@ function renderFolderSelect() {
   $("#folderSel").innerHTML = opts.join("");
 }
 
+// GitHub-Flavored Markdown. (input tag/attrs kept so GFM task lists render.)
+const PURIFY_CFG = { ADD_TAGS: ["input"], ADD_ATTR: ["type", "checked", "disabled"] };
+
+function configureMarkdown() {
+  marked.use({ gfm: true, breaks: true });
+}
+
+function renderMarkdown(src) {
+  return DOMPurify.sanitize(marked.parse(src || ""), PURIFY_CFG);
+}
+
 function renderPreview() {
   if (!state.current) return;
-  const raw = marked.parse($("#mdtext").value);
-  $("#preview").innerHTML = DOMPurify.sanitize(raw);
+  $("#preview").innerHTML = renderMarkdown($("#mdtext").value);
   $("#preview").querySelectorAll("pre code").forEach((el) => hljs.highlightElement(el));
 }
 
@@ -277,6 +356,23 @@ async function selectNote(id) {
   history.replaceState(null, "", "#" + encodeURIComponent(state.current.id));
   renderList();
   renderEditor();
+  refreshSuggestions();
+}
+
+// offline topic-tag suggestions (server-side TF-IDF); click a chip to accept
+async function refreshSuggestions() {
+  const row = $("#suggestrow");
+  const n = state.current;
+  if (!n || n.trashed) { row.hidden = true; return; }
+  try {
+    const res = await fetch(`/api/notes/${encodeURIComponent(n.id)}/suggest-tags`);
+    const { tags } = await res.json();
+    const fresh = (tags || []).filter((t) => !n.tags.includes(t));
+    if (!fresh.length) { row.hidden = true; $("#suggestchips").innerHTML = ""; return; }
+    $("#suggestchips").innerHTML = fresh.map((t) =>
+      `<button class="suggest-chip" data-suggest="${esc(t)}" title="Add tag">${esc(t)}</button>`).join("");
+    row.hidden = false;
+  } catch { row.hidden = true; }
 }
 
 async function newNote() {
@@ -327,6 +423,7 @@ async function saveNow(extra = {}) {
   setSaveState("saved", "Saved ✓");
   renderSidebar();
   renderList();
+  refreshSuggestions();
   $("#noteDates").textContent =
     "created " + fmtDate(saved.created, true) + " · edited " + fmtDate(saved.updated, true);
 }
@@ -413,19 +510,31 @@ function mdLinePrefix(prefix) {
   onBodyInput();
 }
 
+function mdInsertBlock(text) {
+  const ta = $("#mdtext");
+  ta.setRangeText(text, ta.selectionStart, ta.selectionEnd, "end");
+  ta.focus();
+  onBodyInput();
+}
+
 function applyMd(kind) {
   switch (kind) {
-    case "bold":   return mdWrap("**", "**", "bold");
-    case "italic": return mdWrap("*", "*", "italic");
-    case "code": {
-      const ta = $("#mdtext");
-      const sel = ta.value.slice(ta.selectionStart, ta.selectionEnd);
-      return sel.includes("\n") ? mdWrap("```\n", "\n```", "code") : mdWrap("`", "`", "code");
-    }
-    case "link":  return mdWrap("[", "](url)", "text");
-    case "h2":    return mdLinePrefix("## ");
-    case "ul":    return mdLinePrefix("- ");
-    case "quote": return mdLinePrefix("> ");
+    case "bold":      return mdWrap("**", "**", "bold");
+    case "italic":    return mdWrap("*", "*", "italic");
+    case "strike":    return mdWrap("~~", "~~", "strikethrough");
+    case "code":      return mdWrap("`", "`", "code");
+    case "codeblock": return mdWrap("```\n", "\n```", "code");
+    case "link":      return mdWrap("[", "](https://)", "text");
+    case "image":     return mdWrap("![", "](path/to/image.png)", "alt");
+    case "h1":        return mdLinePrefix("# ");
+    case "h2":        return mdLinePrefix("## ");
+    case "h3":        return mdLinePrefix("### ");
+    case "quote":     return mdLinePrefix("> ");
+    case "ul":        return mdLinePrefix("- ");
+    case "ol":        return mdLinePrefix("1. ");
+    case "task":      return mdLinePrefix("- [ ] ");
+    case "hr":        return mdInsertBlock("\n---\n");
+    case "table":     return mdInsertBlock("\n| Column A | Column B |\n|----------|----------|\n| cell 1   | cell 2   |\n");
   }
 }
 
@@ -435,14 +544,18 @@ function exportPrint() {
   $("#exportMenu").open = false;
 }
 
-async function exportEisvogel(toc) {
+async function exportEisvogel() {
   const n = state.current;
   if (!n) return;
+  const titlepage = $("#optTitlepage").checked;
+  const toc = $("#optToc").checked;
+  localStorage.setItem("pn-export-titlepage", titlepage ? "1" : "0");
+  localStorage.setItem("pn-export-toc", toc ? "1" : "0");
   $("#exportMenu").open = false;
   setSaveState("saving", "Exporting PDF… (first run may take a few minutes)");
   try {
     if (state.dirty) await saveNow();
-    const r = await fetch(`/api/export/pdf/${encodeURIComponent(n.id)}?titlepage=1${toc ? "&toc=1" : ""}`);
+    const r = await fetch(`/api/export/pdf/${encodeURIComponent(n.id)}?titlepage=${titlepage ? 1 : 0}&toc=${toc ? 1 : 0}`);
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
       alert("PDF export failed:\n\n" + (err.error || r.statusText));
@@ -473,6 +586,43 @@ function onBodyInput() {
   }
 }
 
+// drag-to-resize the sidebar and note-list panes; widths persist per pane
+function initResizers() {
+  const panes = {
+    sidebar:  { el: $("#sidebar"),  key: "pn-w-sidebar",  min: 150, max: 460, def: 220 },
+    listpane: { el: $("#listpane"), key: "pn-w-listpane", min: 220, max: 640, def: 320 },
+  };
+  for (const p of Object.values(panes)) {
+    const saved = parseInt(localStorage.getItem(p.key) || "", 10);
+    p.el.style.width = (saved >= p.min && saved <= p.max ? saved : p.def) + "px";
+  }
+  for (const handle of $$(".resizer")) {
+    handle.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      const p = panes[handle.dataset.resize];
+      const startX = e.clientX;
+      const startW = p.el.getBoundingClientRect().width;
+      handle.classList.add("dragging");
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      const onMove = (ev) => {
+        const w = Math.max(p.min, Math.min(p.max, startW + ev.clientX - startX));
+        p.el.style.width = w + "px";
+      };
+      const onUp = () => {
+        handle.classList.remove("dragging");
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        localStorage.setItem(p.key, String(Math.round(p.el.getBoundingClientRect().width)));
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    });
+  }
+}
+
 function bindEvents() {
   // sidebar navigation
   $("#views").addEventListener("click", (e) => {
@@ -489,20 +639,22 @@ function bindEvents() {
     renderAll();
   });
 
-  // folders
+  // folder tree
   $("#folderlist").addEventListener("click", (e) => {
+    const tog = e.target.closest("[data-toggle]");
+    if (tog) { e.stopPropagation(); toggleFolder(tog.dataset.toggle); return; }
+    const add = e.target.closest("[data-add]");
+    if (add) { e.stopPropagation(); createFolderFlow(false, add.dataset.add); return; }
     const del = e.target.closest("[data-del]");
     if (del) { e.stopPropagation(); deleteFolder(del.dataset.del); return; }
     const a = e.target.closest("a[data-folder]");
-    if (!a) return;
-    state.folder = a.dataset.folder; state.view = "all"; state.tag = null;
-    renderAll();
+    if (a) { state.folder = a.dataset.folder; state.view = "all"; state.tag = null; renderAll(); }
   });
   $("#folderlist").addEventListener("dblclick", (e) => {
     const a = e.target.closest("a[data-folder]");
     if (a) renameFolder(a.dataset.folder);
   });
-  $("#newFolderBtn").addEventListener("click", () => createFolderFlow());
+  $("#newFolderBtn").addEventListener("click", () => createFolderFlow(false, ""));
   $("#folderSel").addEventListener("change", onFolderSelect);
 
   // list
@@ -562,6 +714,10 @@ function bindEvents() {
   $("#tagchips").addEventListener("click", (e) => {
     if (e.target.classList.contains("x")) removeTag(e.target.dataset.tag);
   });
+  $("#suggestchips").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-suggest]");
+    if (b) addTag(b.dataset.suggest);
+  });
 
   // note actions
   $("#starBtn").addEventListener("click", toggleStar);
@@ -569,8 +725,15 @@ function bindEvents() {
   $("#restoreBtn").addEventListener("click", restoreNote);
   $("#purgeBtn").addEventListener("click", purgeNote);
   $("#exPrint").addEventListener("click", exportPrint);
-  $("#exEisvogel").addEventListener("click", () => exportEisvogel(false));
-  $("#exEisvogelToc").addEventListener("click", () => exportEisvogel(true));
+  $("#exEisvogel").addEventListener("click", () => exportEisvogel());
+  // markdown quick-reference modal
+  $("#cheatBtn").addEventListener("click", () => { $("#cheatOverlay").hidden = false; });
+  $("#cheatClose").addEventListener("click", () => { $("#cheatOverlay").hidden = true; });
+  $("#cheatOverlay").addEventListener("click", (e) => {
+    if (e.target.id === "cheatOverlay") $("#cheatOverlay").hidden = true;
+  });
+
+  // close the export menu on an outside click
   document.addEventListener("click", (e) => {
     const menu = $("#exportMenu");
     if (menu.open && !menu.contains(e.target)) menu.open = false;
@@ -580,6 +743,7 @@ function bindEvents() {
 
   // global shortcuts
   document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$("#cheatOverlay").hidden) { $("#cheatOverlay").hidden = true; return; }
     const mod = e.ctrlKey || e.metaKey;
     if (mod && e.altKey && e.key.toLowerCase() === "n") { e.preventDefault(); newNote(); }
     else if (mod && e.key.toLowerCase() === "k") { e.preventDefault(); $("#search").focus(); $("#search").select(); }
@@ -639,53 +803,74 @@ async function onFolderSelect(e) {
   renderFolderSelect();
 }
 
-// create a folder; when assign=true, also return its name for the current note
-async function createFolderFlow(assign) {
-  const name = (prompt("New folder name:") || "").trim();
+function toggleFolder(path) {
+  if (state.collapsed.has(path)) state.collapsed.delete(path);
+  else state.collapsed.add(path);
+  saveCollapsed();
+  renderSidebar();
+}
+
+// create a folder (optionally nested under parentPath). When assign=true, return
+// the created path for the current note instead of navigating to it.
+async function createFolderFlow(assign, parentPath) {
+  const prompt_ = parentPath
+    ? `New subfolder inside “${parentPath}”:`
+    : "New folder (use / to nest, e.g. Work/Projects):";
+  const name = (prompt(prompt_) || "").trim();
   if (!name) return "";
+  const path = parentPath ? parentPath + "/" + name : name;
   const r = await fetch("/api/folders", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name: path }),
   });
   if (!r.ok) { alert("Could not create folder."); return ""; }
   const created = (await r.json()).name;
   await refreshFolders();
-  if (!assign) {
-    state.folder = created; state.view = "all"; state.tag = null;
-  }
+  if (parentPath) { state.collapsed.delete(parentPath); saveCollapsed(); } // reveal the new child
+  if (!assign) { state.folder = created; state.view = "all"; state.tag = null; }
   renderSidebar();
   renderList();
   return created;
 }
 
-async function renameFolder(from) {
-  const to = (prompt("Rename folder:", from) || "").trim();
-  if (!to || to === from) return;
+// remap a folder path (and its descendants) from -> to
+function remapFolder(f, from, to) {
+  if (f === from) return to;
+  if (f && f.startsWith(from + "/")) return to + f.slice(from.length);
+  return f;
+}
+
+async function renameFolder(path) {
+  const leaf = path.split("/").pop();
+  const to = (prompt("Rename folder:", leaf) || "").trim();
+  if (!to || to === leaf) return;
+  const parent = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+  const newPath = parent ? parent + "/" + to : to;
   await fetch("/api/folders/rename", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ from, to }),
+    body: JSON.stringify({ from: path, to: newPath }),
   });
   await refreshFolders();
-  // reflect the rename in already-loaded notes + active filter
-  for (const n of state.notes) if (n.folder === from) n.folder = to;
-  if (state.current && state.current.folder === from) state.current.folder = to;
-  if (state.folder === from) state.folder = to;
+  for (const n of state.notes) n.folder = remapFolder(n.folder, path, newPath);
+  if (state.current) state.current.folder = remapFolder(state.current.folder, path, newPath);
+  if (state.folder) state.folder = remapFolder(state.folder, path, newPath);
   renderAll();
 }
 
-async function deleteFolder(name) {
-  const count = folderCounts()[name] || 0;
-  const msg = count
-    ? `Delete folder “${name}”? Its ${count} note${count === 1 ? "" : "s"} will become uncategorized (not deleted).`
-    : `Delete empty folder “${name}”?`;
+async function deleteFolder(path) {
+  const inSub = (f) => f && (f === path || f.startsWith(path + "/"));
+  const affected = state.notes.filter((n) => !n.trashed && inSub(n.folder)).length;
+  const hasKids = state.folders.some((f) => f.startsWith(path + "/"));
+  const msg = `Delete folder “${path}”${hasKids ? " and its subfolders" : ""}?` +
+    (affected ? ` ${affected} note${affected === 1 ? "" : "s"} will become uncategorized (not deleted).` : "");
   if (!confirm(msg)) return;
   await fetch("/api/folders/delete", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name: path }),
   });
   await refreshFolders();
-  for (const n of state.notes) if (n.folder === name) n.folder = "";
-  if (state.current && state.current.folder === name) state.current.folder = "";
-  if (state.folder === name) { state.folder = null; state.view = "all"; }
+  for (const n of state.notes) if (inSub(n.folder)) n.folder = "";
+  if (state.current && inSub(state.current.folder)) state.current.folder = "";
+  if (inSub(state.folder)) { state.folder = null; state.view = "all"; }
   renderAll();
 }

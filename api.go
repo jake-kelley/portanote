@@ -127,6 +127,10 @@ func newAPI(store *Store, uiFS fs.FS) http.Handler {
 		writeJSON(w, http.StatusOK, store.Folders())
 	})
 
+	mux.HandleFunc("GET /api/notes/{id}/suggest-tags", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string][]string{"tags": store.SuggestTags(r.PathValue("id"), 6)})
+	})
+
 	mux.HandleFunc("GET /api/search", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query().Get("q")
 		includeTrashed := r.URL.Query().Get("trash") == "1"
@@ -141,7 +145,7 @@ func newAPI(store *Store, uiFS fs.FS) http.Handler {
 		}
 		opts := ExportOpts{
 			TOC:       r.URL.Query().Get("toc") == "1",
-			TitlePage: r.URL.Query().Get("titlepage") != "0",
+			TitlePage: r.URL.Query().Get("titlepage") == "1",
 			NotesDir:  store.dir,
 		}
 		pdf, err := ExportEisvogelPDF(n, opts)

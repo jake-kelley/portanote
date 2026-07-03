@@ -6,11 +6,13 @@ A portable, Standard Notes–style markdown notes app in a **single ~7 MB binary
 
 <sub>Light mode above; a dark theme is built in too ([screenshot](docs/screenshot-dark.png)).</sub>
 
-- **Three-pane UI** like Standard Notes: folders + tags sidebar · searchable note list · markdown editor with live preview (edit / split / preview), dark mode, starring, trash.
+- **Three-pane UI** like Standard Notes: a **collapsible nested-folder tree** + tags sidebar · searchable note list · markdown editor with live preview (edit / split / preview), dark mode, starring, trash.
+- **Full GitHub-Flavored Markdown editor**: a formatting toolbar (headings, **bold**/*italic*/~~strike~~, lists, task lists, tables, code, links/images) and a built-in **Markdown quick-reference** (the `❔` button).
+- **Auto-tag suggestions**: an offline TF-IDF pass over your note **titles and headers** proposes topic tags under the tag row — one click to accept. Your manual add/remove stays in control, and no note content ever leaves your machine.
 - **Fast search-as-you-type**: in-memory BM25 full-text index with prefix matching and title/tag boosting, plus substring fallback. Instant at personal-collection scale.
 - **Eisvogel PDF export**, two ways:
   1. **Built-in (zero dependencies):** an Eisvogel-styled print view → browser *Save as PDF*. Works everywhere, immediately.
-  2. **True Eisvogel (pandoc):** drop portable `pandoc` + `tectonic` into `tools/` (script provided) and export real LaTeX PDFs — title page with the signature rule, running headers, listings code blocks, optional TOC.
+  2. **True Eisvogel (pandoc):** drop portable `pandoc` + `tectonic` into `tools/` (script provided) and export real LaTeX PDFs — running headers, listings code blocks, and a toggleable front title page and table of contents.
 - **Your data is just files.** `notes/*.md` with YAML frontmatter. Sync/back up with anything; drop existing `.md` files in and they appear on restart.
 
 ## Run it
@@ -31,9 +33,9 @@ If Gatekeeper still complains ("cannot be opened because it is from an unidentif
 
 Flags: `-port 8737` (walks upward if busy) · `-dir path/to/notes` · `-no-browser` · `-host`. By default the server binds **127.0.0.1 only** — nothing is exposed to the network.
 
-### Reaching it from your phone (`-host`)
+### Reaching the app (`-host`)
 
-- `-host subnet` — **recommended for phone access.** Binds all interfaces but only serves clients whose IP is on this device's own local subnet (auto-detected from the interface netmask, e.g. `10.10.10.100` → `10.10.10.0/24`); localhost is always allowed and anything off-subnet gets a `403`. Open the `http://<this-device-ip>:<port>` URL it prints on your phone.
+- `-host subnet` — **recommended for accessing on other devices.** Binds all interfaces but only serves clients whose IP is on this device's own local subnet (auto-detected from the interface netmask, e.g. `10.10.10.100` → `10.10.10.0/24`); localhost is always allowed and anything off-subnet gets a `403`. Open the `http://<this-device-ip>:<port>` URL it prints on your phone.
 - `-host 0.0.0.0` — binds all interfaces with **no** source restriction (any routable host can reach it).
 
 Both still have **no password** for clients that are allowed through, and the OS firewall is a separate layer — Windows may still block the inbound port regardless of `-host` (see the security note below).
@@ -52,6 +54,7 @@ sh scripts/get-tools.sh
 This downloads two **portable** binaries into `tools/` (~280 MB, no installation): [pandoc](https://github.com/jgm/pandoc) and [tectonic](https://tectonic-typesetting.github.io/) — a self-contained LaTeX engine. The app detects them automatically (the sidebar badge flips to **PDF: eisvogel**) and the export menu items enable.
 
 Notes:
+- **Front title page and table of contents are independent toggles** in the export menu (⤓) — check either, both, or neither before hitting *Export PDF*; your choice is remembered for next time.
 - The **first export downloads ~100 MB of LaTeX packages** into `tools/tectonic-cache/` and takes a few minutes; after that, exports run in seconds and work offline.
 - The [Eisvogel template](https://github.com/Wandmalfarbe/pandoc-latex-template) (v3.5.0) is embedded in the binary itself. One vendored tweak: `sourcesans` → `sourcesanspro` (same Source Sans font, but present in tectonic's package bundle).
 - No `tools/`? The **Print / Save as PDF** menu item always works — it opens an Eisvogel-styled print view (title page, rule, headers/footers with page numbers via CSS `@page`) and triggers the browser's print dialog.
@@ -69,9 +72,13 @@ Notes:
 
 ## Note file format
 
+Files are named **`DDMONTHYYYY-title-slug.md`** — e.g. a note titled *Test Deployment* created on 3 July 2026 becomes `03JULY2026-test-deployment.md`. Rename the title and the file follows (the date stays as the created date); the stable `id` in the frontmatter keeps everything linked, so renames never break anything.
+
 ```markdown
 ---
+id: "20260703-043521-2f04bc"
 title: "AWS GuardDuty Runbook"
+folder: "Work/Runbooks/AWS"
 tags: [aws, security]
 starred: true
 trashed: false

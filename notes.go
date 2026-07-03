@@ -30,6 +30,7 @@ type Meta struct {
 type Note struct {
 	Meta
 	Body string `json:"body"`
+	file string // on-disk basename (no .md); tracks date+title, server-only
 }
 
 type ListItem struct {
@@ -40,6 +41,39 @@ type ListItem struct {
 var ErrNotFound = errors.New("note not found")
 
 var idRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._()-]*$`)
+
+// noteFilename builds the on-disk basename "DDMONTHYYYY-title-slug", e.g.
+// created 2026-07-03 + title "Test Deployment" -> "03JULY2026-test-deployment".
+func noteFilename(created time.Time, title string) string {
+	stamp := created.Format("02") + strings.ToUpper(created.Format("January")) + created.Format("2006")
+	slug := slugify(title)
+	if slug == "" {
+		slug = "untitled"
+	}
+	return stamp + "-" + slug
+}
+
+func slugify(s string) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range strings.ToLower(strings.TrimSpace(s)) {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
+			b.WriteRune(r)
+			dash = false
+		case r == ' ' || r == '-' || r == '_' || r == '/' || r == '.':
+			if b.Len() > 0 && !dash {
+				b.WriteByte('-')
+				dash = true
+			}
+		}
+	}
+	slug := strings.Trim(b.String(), "-")
+	if len(slug) > 60 {
+		slug = strings.Trim(slug[:60], "-")
+	}
+	return slug
+}
 
 type Store struct {
 	dir     string
@@ -64,15 +98,15 @@ func NewStore(dir string) (*Store, error) {
 		if e.IsDir() || !strings.HasSuffix(strings.ToLower(e.Name()), ".md") {
 			continue
 		}
-		id := strings.TrimSuffix(e.Name(), filepath.Ext(e.Name()))
-		if !idRe.MatchString(id) {
+		fileBase := strings.TrimSuffix(e.Name(), filepath.Ext(e.Name()))
+		if !idRe.MatchString(fileBase) {
 			continue
 		}
 		raw, err := os.ReadFile(filepath.Join(dir, e.Name()))
 		if err != nil {
 			continue
 		}
-		n := parseNote(id, string(raw))
+		n := parseNote(fileBase, string(raw))
 		// files dropped in by hand have no frontmatter timestamps — use the file's
 		if n.Created.IsZero() || n.Updated.IsZero() {
 			if info, err := e.Info(); err == nil {
@@ -84,8 +118,10 @@ func NewStore(dir string) (*Store, error) {
 				}
 			}
 		}
-		s.notes[id] = n
-		s.idx.Put(id, n.Title, n.Tags, n.Body)
+		// the map key is the stable ID (from frontmatter, or the filename for
+		// legacy/hand-made notes); n.file is the actual basename on disk
+		s.notes[n.ID] = n
+		s.idx.Put(n.ID, n.Title, n.Tags, n.Body)
 	}
 	s.loadFolders()
 	return s, nil
@@ -127,6 +163,7 @@ func (s *Store) Create(title string) (*Note, error) {
 	rand.Read(b)
 	id := now.Format("20060102-150405") + "-" + hex.EncodeToString(b)
 	n := &Note{Meta: Meta{ID: id, Title: title, Tags: []string{}, Created: now, Updated: now}}
+	n.file = s.uniqueFilenameLocked(noteFilename(now, title), id)
 	if err := s.write(n); err != nil {
 		return nil, err
 	}
@@ -134,6 +171,26 @@ func (s *Store) Create(title string) (*Note, error) {
 	s.idx.Put(id, n.Title, n.Tags, n.Body)
 	cp := *n
 	return &cp, nil
+}
+
+// uniqueFilenameLocked returns base, or base-2/base-3/… if another note already
+// occupies that filename. Caller holds s.mu.
+func (s *Store) uniqueFilenameLocked(base, selfID string) string {
+	inUse := map[string]bool{}
+	for id, n := range s.notes {
+		if id != selfID {
+			inUse[n.file] = true
+		}
+	}
+	if !inUse[base] {
+		return base
+	}
+	for i := 2; ; i++ {
+		cand := fmt.Sprintf("%s-%d", base, i)
+		if !inUse[cand] {
+			return cand
+		}
+	}
 }
 
 type UpdateReq struct {
@@ -170,7 +227,7 @@ func (s *Store) Update(id string, req UpdateReq) (*Note, error) {
 	}
 	// folder is organizational (like starred) — a move shouldn't bump the edit time
 	if req.Folder != nil {
-		f := cleanFolderName(*req.Folder)
+		f := cleanFolderPath(*req.Folder)
 		if f != n.Folder {
 			n.Folder = f
 			if f != "" {
@@ -188,8 +245,14 @@ func (s *Store) Update(id string, req UpdateReq) (*Note, error) {
 	if contentChanged {
 		n.Updated = time.Now().UTC().Truncate(time.Second)
 	}
+	// keep the on-disk filename in sync with the title (date stays as created)
+	oldFile := n.file
+	n.file = s.uniqueFilenameLocked(noteFilename(n.Created, n.Title), n.ID)
 	if err := s.write(n); err != nil {
 		return nil, err
+	}
+	if oldFile != "" && oldFile != n.file {
+		os.Remove(filepath.Join(s.dir, oldFile+".md"))
 	}
 	s.idx.Put(id, n.Title, n.Tags, n.Body)
 	cp := *n
@@ -200,10 +263,11 @@ func (s *Store) Update(id string, req UpdateReq) (*Note, error) {
 func (s *Store) Delete(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.notes[id]; !ok {
+	n, ok := s.notes[id]
+	if !ok {
 		return ErrNotFound
 	}
-	if err := os.Remove(filepath.Join(s.dir, id+".md")); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(filepath.Join(s.dir, n.file+".md")); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	delete(s.notes, id)
@@ -267,7 +331,10 @@ func (s *Store) Search(q string, includeTrashed bool) []SearchResult {
 // ---------------------------------------------------------------- files
 
 func (s *Store) write(n *Note) error {
-	path := filepath.Join(s.dir, n.ID+".md")
+	if n.file == "" {
+		n.file = noteFilename(n.Created, n.Title)
+	}
+	path := filepath.Join(s.dir, n.file+".md")
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, []byte(serializeNote(n)), 0o644); err != nil {
 		return err
@@ -278,6 +345,7 @@ func (s *Store) write(n *Note) error {
 func serializeNote(n *Note) string {
 	var b strings.Builder
 	b.WriteString("---\n")
+	fmt.Fprintf(&b, "id: %q\n", n.ID)
 	fmt.Fprintf(&b, "title: %q\n", n.Title)
 	fmt.Fprintf(&b, "folder: %q\n", n.Folder)
 	b.WriteString("tags: [")
@@ -297,8 +365,9 @@ func serializeNote(n *Note) string {
 	return b.String()
 }
 
-func parseNote(id, raw string) *Note {
-	n := &Note{Meta: Meta{ID: id, Tags: []string{}}}
+func parseNote(fileBase, raw string) *Note {
+	// ID defaults to the filename; frontmatter `id:` overrides it if present.
+	n := &Note{Meta: Meta{ID: fileBase, Tags: []string{}}, file: fileBase}
 	body := raw
 	if strings.HasPrefix(raw, "---\n") || strings.HasPrefix(raw, "---\r\n") {
 		rest := raw[strings.Index(raw, "\n")+1:]
@@ -311,7 +380,7 @@ func parseNote(id, raw string) *Note {
 	}
 	n.Body = body
 	if n.Title == "" {
-		n.Title = deriveTitle(id, body)
+		n.Title = deriveTitle(fileBase, body)
 	}
 	return n
 }
@@ -336,6 +405,10 @@ func parseFrontmatter(fm string, n *Note) {
 		}
 		val = strings.TrimSpace(val)
 		switch strings.TrimSpace(key) {
+		case "id":
+			if v := unquote(val); v != "" {
+				n.ID = v
+			}
 		case "title":
 			n.Title = unquote(val)
 		case "folder":
@@ -476,16 +549,62 @@ func slicesEqual(a, b []string) bool {
 }
 
 // ---------------------------------------------------------------- folders
+//
+// Folders form a tree: a folder is a "/"-separated path like "Work/Projects/Alpha".
+// A note's Folder field holds one such path; ancestor paths are kept in the
+// manifest so intermediate (even empty) folders render in the tree.
 
-func cleanFolderName(name string) string {
-	// folders are labels, not paths — no slashes or control chars
-	name = strings.Map(func(r rune) rune {
-		if r < 0x20 || r == '/' || r == '\\' {
-			return -1
+// cleanFolderPath sanitizes each "/"-separated segment and drops empty ones.
+func cleanFolderPath(path string) string {
+	segs := strings.Split(path, "/")
+	out := make([]string, 0, len(segs))
+	for _, seg := range segs {
+		seg = strings.Map(func(r rune) rune {
+			if r < 0x20 || r == '\\' {
+				return -1
+			}
+			return r
+		}, seg)
+		if seg = strings.TrimSpace(seg); seg != "" {
+			out = append(out, seg)
 		}
-		return r
-	}, name)
-	return strings.TrimSpace(name)
+	}
+	return strings.Join(out, "/")
+}
+
+// ancestorPaths returns the ancestors of p, nearest-root first (excludes p).
+// "a/b/c" -> ["a", "a/b"]
+func ancestorPaths(p string) []string {
+	segs := strings.Split(p, "/")
+	out := make([]string, 0, len(segs)-1)
+	for i := 1; i < len(segs); i++ {
+		out = append(out, strings.Join(segs[:i], "/"))
+	}
+	return out
+}
+
+// underFolder reports whether path is folder itself or nested beneath it.
+func underFolder(path, folder string) bool {
+	lp, lf := strings.ToLower(path), strings.ToLower(folder)
+	return lp == lf || strings.HasPrefix(lp, lf+"/")
+}
+
+// addFolderPathLocked adds path and any missing ancestors to the manifest
+// (no save). Caller holds s.mu.
+func (s *Store) addFolderPathLocked(path string) {
+	has := func(p string) bool {
+		for _, f := range s.folders {
+			if strings.EqualFold(f, p) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, p := range append(ancestorPaths(path), path) {
+		if !has(p) {
+			s.folders = append(s.folders, p)
+		}
+	}
 }
 
 // Folders returns the ordered folder list with live note counts (trashed excluded).
@@ -506,43 +625,52 @@ func (s *Store) Folders() []FolderInfo {
 	return out
 }
 
-func (s *Store) CreateFolder(name string) (string, error) {
-	name = cleanFolderName(name)
-	if name == "" {
+func (s *Store) CreateFolder(path string) (string, error) {
+	path = cleanFolderPath(path)
+	if path == "" {
 		return "", errors.New("folder name required")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, f := range s.folders {
-		if strings.EqualFold(f, name) {
+		if strings.EqualFold(f, path) {
 			return f, nil // already exists — return canonical
 		}
 	}
-	s.folders = append(s.folders, name)
-	return name, s.saveFolders()
+	s.addFolderPathLocked(path)
+	return path, s.saveFolders()
 }
 
+// RenameFolder renames a folder and re-homes the whole subtree beneath it
+// (both the manifest and every affected note). Passing a `to` with a different
+// parent effectively moves the subtree.
 func (s *Store) RenameFolder(from, to string) error {
-	to = cleanFolderName(to)
-	if to == "" {
+	from = cleanFolderPath(from)
+	to = cleanFolderPath(to)
+	if from == "" || to == "" {
 		return errors.New("folder name required")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	renamed := false
+	remap := func(p string) (string, bool) {
+		if strings.EqualFold(p, from) {
+			return to, true
+		}
+		if strings.HasPrefix(strings.ToLower(p), strings.ToLower(from)+"/") {
+			return to + p[len(from):], true // keep the suffix (incl. leading "/")
+		}
+		return p, false
+	}
 	for i, f := range s.folders {
-		if strings.EqualFold(f, from) {
-			s.folders[i] = to
-			renamed = true
+		if np, ok := remap(f); ok {
+			s.folders[i] = np
 		}
 	}
-	if !renamed {
-		s.folders = append(s.folders, to)
-	}
+	s.addFolderPathLocked(to)
 	s.folders = dedupeFolders(s.folders)
 	for _, n := range s.notes {
-		if strings.EqualFold(n.Folder, from) {
-			n.Folder = to
+		if np, ok := remap(n.Folder); ok {
+			n.Folder = np
 			if err := s.write(n); err != nil {
 				return err
 			}
@@ -551,19 +679,21 @@ func (s *Store) RenameFolder(from, to string) error {
 	return s.saveFolders()
 }
 
-// DeleteFolder removes the folder; notes inside it become uncategorized.
-func (s *Store) DeleteFolder(name string) error {
+// DeleteFolder removes a folder and its whole subtree; notes anywhere in that
+// subtree become uncategorized (they are not deleted).
+func (s *Store) DeleteFolder(path string) error {
+	path = cleanFolderPath(path)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	kept := s.folders[:0:0]
 	for _, f := range s.folders {
-		if !strings.EqualFold(f, name) {
+		if !underFolder(f, path) {
 			kept = append(kept, f)
 		}
 	}
 	s.folders = kept
 	for _, n := range s.notes {
-		if strings.EqualFold(n.Folder, name) {
+		if n.Folder != "" && underFolder(n.Folder, path) {
 			n.Folder = ""
 			if err := s.write(n); err != nil {
 				return err
@@ -573,15 +703,14 @@ func (s *Store) DeleteFolder(name string) error {
 	return s.saveFolders()
 }
 
-// ensureFolderLocked adds a folder to the manifest if missing. Caller holds s.mu.
-func (s *Store) ensureFolderLocked(name string) {
-	for _, f := range s.folders {
-		if strings.EqualFold(f, name) {
-			return
-		}
+// ensureFolderLocked adds a folder path (and ancestors) if missing, then saves.
+// Caller holds s.mu.
+func (s *Store) ensureFolderLocked(path string) {
+	before := len(s.folders)
+	s.addFolderPathLocked(path)
+	if len(s.folders) != before {
+		s.saveFolders()
 	}
-	s.folders = append(s.folders, name)
-	s.saveFolders()
 }
 
 func (s *Store) foldersPath() string {
@@ -615,6 +744,11 @@ func (s *Store) loadFolders() {
 	}
 	sort.Slice(names, func(i, j int) bool { return strings.ToLower(names[i]) < strings.ToLower(names[j]) })
 	s.folders = append(s.folders, names...)
+	// backfill any missing ancestors so the tree has no gaps
+	for _, f := range append([]string{}, s.folders...) {
+		s.addFolderPathLocked(f)
+	}
+	s.folders = dedupeFolders(s.folders)
 }
 
 func (s *Store) saveFolders() error {
@@ -630,7 +764,7 @@ func dedupeFolders(in []string) []string {
 	seen := map[string]bool{}
 	out := []string{}
 	for _, f := range in {
-		f = cleanFolderName(f)
+		f = cleanFolderPath(f)
 		k := strings.ToLower(f)
 		if f == "" || seen[k] {
 			continue

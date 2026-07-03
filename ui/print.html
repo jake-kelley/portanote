@@ -101,7 +101,7 @@ article li{margin:.15em 0;}
     .toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
 
   marked.use({ gfm: true, breaks: true });
-  const html = DOMPurify.sanitize(marked.parse(n.body || ""));
+  const html = DOMPurify.sanitize(marked.parse(n.body || ""), { ADD_TAGS: ["input"], ADD_ATTR: ["type", "checked", "disabled"] });
   const article = document.getElementById("content");
   article.innerHTML = html;
   article.querySelectorAll("pre code").forEach((el) => hljs.highlightElement(el));

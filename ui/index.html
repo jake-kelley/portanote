@@ -42,6 +42,8 @@
     </div>
   </aside>
 
+  <div class="resizer" data-resize="sidebar" title="Drag to resize"></div>
+
   <section id="listpane">
     <header class="list-head">
       <h2 id="listTitle">Notes</h2>
@@ -57,6 +59,8 @@
     </div>
     <div id="notelist"></div>
   </section>
+
+  <div class="resizer" data-resize="listpane" title="Drag to resize"></div>
 
   <section id="editor">
     <div id="emptyState">
@@ -89,15 +93,38 @@
         <datalist id="tagOptions"></datalist>
       </div>
 
+      <div id="suggestrow" hidden>
+        <span class="suggest-label">✨ Suggested</span>
+        <span id="suggestchips"></span>
+      </div>
+
       <div id="toolbar">
         <div class="tb-group">
           <button data-md="bold" title="Bold (Ctrl+B)"><b>B</b></button>
           <button data-md="italic" title="Italic (Ctrl+I)"><i>I</i></button>
-          <button data-md="code" title="Code (Ctrl+`)">&lt;/&gt;</button>
-          <button data-md="link" title="Link (Ctrl+L)">🔗</button>
-          <button data-md="h2" title="Heading">H</button>
-          <button data-md="ul" title="Bullet list">≔</button>
+          <button data-md="strike" title="Strikethrough">S̶</button>
+          <button data-md="code" title="Inline code (Ctrl+`)">&lt;/&gt;</button>
+        </div>
+        <div class="tb-group">
+          <button data-md="h1" title="Heading 1">H1</button>
+          <button data-md="h2" title="Heading 2">H2</button>
+          <button data-md="h3" title="Heading 3">H3</button>
+        </div>
+        <div class="tb-group">
           <button data-md="quote" title="Quote">❝</button>
+          <button data-md="codeblock" title="Code block">⌗</button>
+          <button data-md="hr" title="Horizontal rule">―</button>
+        </div>
+        <div class="tb-group">
+          <button data-md="ul" title="Bullet list">•≡</button>
+          <button data-md="ol" title="Numbered list">1.</button>
+          <button data-md="task" title="Task list">☑</button>
+        </div>
+        <div class="tb-group">
+          <button data-md="link" title="Link (Ctrl+L)">🔗</button>
+          <button data-md="image" title="Image">🖼</button>
+          <button data-md="table" title="Table">▦</button>
+          <button id="cheatBtn" title="Markdown quick reference">❔</button>
         </div>
         <div class="tb-group seg" id="modeSeg">
           <button data-mode="edit">Edit</button>
@@ -110,8 +137,11 @@
             <summary title="Export">⤓</summary>
             <div class="menu">
               <button id="exPrint">🖨&nbsp; Print / Save as PDF <span class="mhint">built-in</span></button>
-              <button id="exEisvogel">📄&nbsp; Eisvogel PDF <span class="mhint">pandoc</span></button>
-              <button id="exEisvogelToc">📑&nbsp; Eisvogel PDF + TOC <span class="mhint">pandoc</span></button>
+              <div class="mdiv"></div>
+              <div class="mlabel">Eisvogel PDF <span class="mhint">pandoc</span></div>
+              <label class="mtoggle"><input type="checkbox" id="optTitlepage"> Front title page</label>
+              <label class="mtoggle"><input type="checkbox" id="optToc"> Table of contents</label>
+              <button id="exEisvogel" class="mexport">📄&nbsp; Export PDF</button>
               <div id="exNote" class="mnote" hidden>Drop pandoc + tectonic into <code>tools/</code> to enable Eisvogel export (see README)</div>
             </div>
           </details>
@@ -132,6 +162,87 @@
     </div>
   </section>
 
+</div>
+
+<div id="cheatOverlay" hidden>
+  <div id="cheatModal" role="dialog" aria-label="Markdown quick reference">
+    <header class="cheat-head">
+      <h2>Markdown quick reference <span class="cheat-sub">GitHub-Flavored Markdown</span></h2>
+      <button id="cheatClose" title="Close (Esc)">✕</button>
+    </header>
+    <div class="cheat-body">
+
+      <section>
+        <h3>Headings</h3>
+        <table class="cheat">
+          <tr><td><code># H1</code></td><td>Top-level heading</td></tr>
+          <tr><td><code>## H2</code> · <code>### H3</code></td><td>Sub-headings (down to <code>######</code>)</td></tr>
+        </table>
+      </section>
+
+      <section>
+        <h3>Emphasis</h3>
+        <table class="cheat">
+          <tr><td><code>**bold**</code></td><td><b>bold</b></td></tr>
+          <tr><td><code>*italic*</code></td><td><i>italic</i></td></tr>
+          <tr><td><code>***bold italic***</code></td><td><b><i>both</i></b></td></tr>
+          <tr><td><code>~~strikethrough~~</code></td><td><del>struck</del></td></tr>
+          <tr><td><code>`inline code`</code></td><td><code>inline code</code></td></tr>
+        </table>
+      </section>
+
+      <section>
+        <h3>Lists</h3>
+        <table class="cheat">
+          <tr><td><code>- item</code> or <code>* item</code></td><td>Bulleted list</td></tr>
+          <tr><td><code>1. item</code></td><td>Numbered list</td></tr>
+          <tr><td><code>&nbsp;&nbsp;- nested</code></td><td>Indent two spaces to nest</td></tr>
+          <tr><td><code>- [ ] todo</code> · <code>- [x] done</code></td><td>Task list (checkboxes)</td></tr>
+        </table>
+      </section>
+
+      <section>
+        <h3>Links &amp; images</h3>
+        <table class="cheat">
+          <tr><td><code>[text](https://url)</code></td><td>Link</td></tr>
+          <tr><td><code>&lt;https://url&gt;</code></td><td>Autolink (bare URLs link too)</td></tr>
+          <tr><td><code>![alt](path/to/img.png)</code></td><td>Image</td></tr>
+        </table>
+      </section>
+
+      <section>
+        <h3>Code blocks</h3>
+        <table class="cheat">
+          <tr><td><code>```lang<br>code<br>```</code></td><td>Fenced block with syntax highlighting (e.g. <code>```bash</code>)</td></tr>
+        </table>
+      </section>
+
+      <section>
+        <h3>Blockquotes &amp; rules</h3>
+        <table class="cheat">
+          <tr><td><code>&gt; quoted</code></td><td>Blockquote (nest with <code>&gt;&gt;</code>)</td></tr>
+          <tr><td><code>---</code></td><td>Horizontal rule</td></tr>
+        </table>
+      </section>
+
+      <section>
+        <h3>Tables</h3>
+        <table class="cheat">
+          <tr><td><code>| A | B |<br>|---|---|<br>| 1 | 2 |</code></td><td>Table. Use <code>:---</code>, <code>:--:</code>, <code>---:</code> in the divider row to align left/center/right.</td></tr>
+        </table>
+      </section>
+
+      <section>
+        <h3>Misc</h3>
+        <table class="cheat">
+          <tr><td><code>footnote[^1]</code> … <code>[^1]: note</code></td><td>Footnote</td></tr>
+          <tr><td>backslash <code>\*</code></td><td>Escape a special character</td></tr>
+          <tr><td>blank line</td><td>Separates paragraphs; two trailing spaces = hard line break</td></tr>
+        </table>
+      </section>
+
+    </div>
+  </div>
 </div>
 </body>
 </html>
