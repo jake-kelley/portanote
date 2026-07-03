@@ -91,7 +91,10 @@ func ExportEisvogelPDF(n *Note, opts ExportOpts) ([]byte, error) {
 	out := filepath.Join(tmp, "note.pdf")
 	args := []string{
 		src, "-o", out,
-		"--from", "markdown+emoji",
+		// disable raw-TeX passthrough so a note body can't inject live LaTeX
+		// (e.g. \lstinputlisting/\input to read host files into the PDF).
+		// raw_attribute must go too, else a ```{=latex} block bypasses it.
+		"--from", "markdown+emoji-raw_tex-raw_attribute",
 		"--template", tmpl,
 		"--pdf-engine", engine,
 		"--listings",

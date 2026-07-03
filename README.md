@@ -25,7 +25,14 @@ xattr -d com.apple.quarantine portanote-macos-arm64   # only needed if it was do
 
 If Gatekeeper still complains ("cannot be opened because it is from an unidentified developer"), go to **System Settings → Privacy & Security → Open Anyway**, or launch it once with right-click → Open. Nothing is installed — deleting the folder removes every trace.
 
-Flags: `-port 8737` (walks upward if busy) · `-dir path/to/notes` · `-no-browser`. The server binds **127.0.0.1 only** — nothing is exposed to the network.
+Flags: `-port 8737` (walks upward if busy) · `-dir path/to/notes` · `-no-browser` · `-host`. By default the server binds **127.0.0.1 only** — nothing is exposed to the network.
+
+### Reaching it from your phone (`-host`)
+
+- `-host subnet` — **recommended for phone access.** Binds all interfaces but only serves clients whose IP is on this device's own local subnet (auto-detected from the interface netmask, e.g. `10.10.10.100` → `10.10.10.0/24`); localhost is always allowed and anything off-subnet gets a `403`. Open the `http://<this-device-ip>:<port>` URL it prints on your phone.
+- `-host 0.0.0.0` — binds all interfaces with **no** source restriction (any routable host can reach it).
+
+Both still have **no password** for clients that are allowed through, and the OS firewall is a separate layer — Windows may still block the inbound port regardless of `-host` (see the security note below).
 
 ## Eisvogel PDF export (the real thing)
 

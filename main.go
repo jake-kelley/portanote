@@ -29,7 +29,7 @@ func main() {
 	var (
 		dir       = flag.String("dir", "", "notes directory (default: ./notes next to the executable)")
 		port      = flag.Int("port", 8737, "port to listen on (increments if busy)")
-		host      = flag.String("host", "127.0.0.1", "interface to bind (use 0.0.0.0 to reach it from your phone on the same network)")
+		host      = flag.String("host", "127.0.0.1", "bind address. 127.0.0.1 (default, localhost only), 0.0.0.0 (whole network), or \"subnet\" (whole network but only accept clients on this device's local subnet, e.g. 10.10.10.0/24)")
 		noBrowser = flag.Bool("no-browser", false, "do not open the browser on start")
 	)
 	flag.Parse()
@@ -57,13 +57,31 @@ func main() {
 		log.Fatal(err)
 	}
 
-	ln, actualPort := listen(*host, *port)
 	mux := newAPI(store, uiFS)
+	var handler http.Handler = mux
+
+	// "subnet" mode: bind everywhere, but only serve clients on this device's
+	// local subnet (loopback always allowed). Anyone else gets a 403.
+	bindHost := *host
+	subnetMode := *host == "subnet" || *host == "lan" || *host == "auto"
+	var allowed *net.IPNet
+	if subnetMode {
+		allowed = lanSubnet()
+		if allowed == nil {
+			log.Fatal("-host subnet: could not detect a local subnet — connect to a network or pass an explicit -host")
+		}
+		bindHost = "0.0.0.0"
+		handler = subnetGuard(mux, allowed)
+	}
+
+	ln, actualPort := listen(bindHost, *port)
 	localURL := fmt.Sprintf("http://127.0.0.1:%d", actualPort)
 	log.Printf("serving at %s  (Ctrl+C to quit)", localURL)
 
-	// When bound to all interfaces, print the LAN address to open on a phone.
-	if *host == "0.0.0.0" || *host == "::" {
+	if subnetMode {
+		log.Printf("on your network:  http://%s:%d", lanIP(), actualPort)
+		log.Printf("access restricted to %s (+ localhost); other hosts get 403. Still no password within the subnet.", allowed.String())
+	} else if *host == "0.0.0.0" || *host == "::" {
 		if ip := lanIP(); ip != "" {
 			log.Printf("on your network:  http://%s:%d   (same Wi-Fi; allow the port through the firewall)", ip, actualPort)
 		}
@@ -73,7 +91,24 @@ func main() {
 	if !*noBrowser {
 		openBrowser(localURL)
 	}
-	log.Fatal(http.Serve(ln, mux))
+	log.Fatal(http.Serve(ln, handler))
+}
+
+// subnetGuard rejects requests whose source IP is neither loopback nor inside
+// allowed. RemoteAddr is the real TCP peer, so this can't be spoofed by a header.
+func subnetGuard(next http.Handler, allowed *net.IPNet) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			host = r.RemoteAddr
+		}
+		ip := net.ParseIP(host)
+		if ip != nil && (ip.IsLoopback() || allowed.Contains(ip)) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		http.Error(w, "forbidden: outside the allowed subnet", http.StatusForbidden)
+	})
 }
 
 // listen binds host on the requested port, walking upward if taken.
@@ -105,6 +140,28 @@ func lanIP() string {
 		}
 	}
 	return ""
+}
+
+// lanSubnet returns the network this device sits on, using the interface's real
+// netmask (e.g. 10.10.10.100/24 -> 10.10.10.0/24), or nil if it can't be found.
+func lanSubnet() *net.IPNet {
+	ip := net.ParseIP(lanIP())
+	if ip == nil {
+		return nil
+	}
+	addrs, _ := net.InterfaceAddrs()
+	for _, a := range addrs {
+		ipnet, ok := a.(*net.IPNet)
+		if ok && ipnet.IP.Equal(ip) {
+			return &net.IPNet{IP: ipnet.IP.Mask(ipnet.Mask), Mask: ipnet.Mask}
+		}
+	}
+	// couldn't read the mask — fall back to assuming a /24
+	if ip4 := ip.To4(); ip4 != nil {
+		mask := net.CIDRMask(24, 32)
+		return &net.IPNet{IP: ip4.Mask(mask), Mask: mask}
+	}
+	return nil
 }
 
 func openBrowser(url string) {
