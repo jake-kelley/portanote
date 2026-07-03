@@ -12,6 +12,7 @@ const state = {
   folder: null,         // active folder filter (exclusive with view/tag)
   folders: [],          // all folder paths ("Work/Projects/Alpha")
   collapsed: new Set(JSON.parse(localStorage.getItem("pn-folders-collapsed") || "[]")),
+  templates: [],
   q: "",
   results: null,        // search results when q is non-empty
   current: null,        // full Note being edited
@@ -31,14 +32,17 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (themeParam === "dark" || themeParam === "light") setTheme(themeParam === "dark");
   else if (localStorage.getItem("pn-theme") === "dark") setTheme(true);
 
-  const [meta, notes, folders] = await Promise.all([
+  const [meta, notes, folders, templates] = await Promise.all([
     fetch("/api/meta").then((r) => r.json()),
     fetch("/api/notes").then((r) => r.json()),
     fetch("/api/folders").then((r) => r.json()),
+    fetch("/api/templates").then((r) => r.json()),
   ]);
   state.meta = meta;
   state.notes = notes;
   state.folders = folders.map((f) => f.name);
+  state.templates = templates || [];
+  renderTemplateMenu();
 
   $("#verLabel").textContent = "v" + meta.version;
   const badge = $("#pdfBadge");
@@ -59,6 +63,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   bindEvents();
   initResizers();
   renderAll();
+
+  // deep link: /?q=<query> pre-fills the search (operators work too)
+  const q = new URLSearchParams(location.search).get("q");
+  if (q) { $("#search").value = q; runSearch(); }
 
   // deep link: /#<note-id> opens that note (and refresh keeps it open)
   const hashId = decodeURIComponent(location.hash.slice(1));
@@ -96,13 +104,15 @@ function highlight(text, q) {
 }
 
 function visibleNotes() {
-  let list;
-  if (state.q && state.results) {
-    list = state.results;
-  } else {
-    list = [...state.notes];
+  // active search (free text and/or operators): global, filtered by operators
+  if (state.q) {
+    const p = state.parsed;
+    let list = (state.results ? [...state.results] : [...state.notes]).filter((n) => matchesFilters(n, p));
+    if (!state.results) list.sort((a, b) => new Date(b.updated) - new Date(a.updated)); // else keep score order
+    return list;
   }
-  list = list.filter((n) => {
+  // no search: filter by the sidebar view / folder / tag
+  let list = state.notes.filter((n) => {
     if (state.folder) return !n.trashed && n.folder && (n.folder === state.folder || n.folder.startsWith(state.folder + "/"));
     if (state.tag) return !n.trashed && n.tags.includes(state.tag);
     switch (state.view) {
@@ -112,14 +122,12 @@ function visibleNotes() {
       default:         return !n.trashed;
     }
   });
-  if (!state.q) {
-    const key = state.sort;
-    list.sort((a, b) => {
-      if (state.view !== "trash" && a.starred !== b.starred) return a.starred ? -1 : 1;
-      if (key === "title") return a.title.localeCompare(b.title);
-      return new Date(b[key]) - new Date(a[key]);
-    });
-  }
+  const key = state.sort;
+  list.sort((a, b) => {
+    if (state.view !== "trash" && a.starred !== b.starred) return a.starred ? -1 : 1;
+    if (key === "title") return a.title.localeCompare(b.title);
+    return new Date(b[key]) - new Date(a[key]);
+  });
   return list;
 }
 
@@ -256,9 +264,10 @@ function renderList() {
     return;
   }
 
+  const hl = (state.parsed && state.parsed.text) || "";
   $("#notelist").innerHTML = list.map((n) => {
-    const title = state.q ? highlight(n.title || "Untitled", state.q) : esc(n.title || "Untitled");
-    const snip = state.q ? highlight(n.snippet, state.q) : esc(n.snippet);
+    const title = hl ? highlight(n.title || "Untitled", hl) : esc(n.title || "Untitled");
+    const snip = hl ? highlight(n.snippet, hl) : esc(n.snippet);
     return `<div class="note-item ${state.current?.id === n.id ? "active" : ""}" data-id="${esc(n.id)}">
       <div class="ni-top"><span class="ni-title">${title}</span>${n.starred ? '<span class="ni-star">★</span>' : ""}</div>
       ${snip ? `<div class="ni-snippet">${snip}</div>` : ""}
@@ -321,7 +330,16 @@ function renderFolderSelect() {
 const PURIFY_CFG = { ADD_TAGS: ["input"], ADD_ATTR: ["type", "checked", "disabled"] };
 
 function configureMarkdown() {
-  marked.use({ gfm: true, breaks: true });
+  const wikilink = {
+    name: "wikilink", level: "inline",
+    start(src) { return src.indexOf("[["); },
+    tokenizer(src) {
+      const m = /^\[\[([^\]|]+)(?:\|([^\]]*))?\]\]/.exec(src);
+      if (m) return { type: "wikilink", raw: m[0], target: m[1].trim(), label: (m[2] || m[1]).trim() };
+    },
+    renderer(token) { return `<a class="wikilink" data-wikilink="${esc(token.target)}">${esc(token.label)}</a>`; },
+  };
+  marked.use({ gfm: true, breaks: true, extensions: [wikilink] });
 }
 
 function renderMarkdown(src) {
@@ -331,7 +349,40 @@ function renderMarkdown(src) {
 function renderPreview() {
   if (!state.current) return;
   $("#preview").innerHTML = renderMarkdown($("#mdtext").value);
-  $("#preview").querySelectorAll("pre code").forEach((el) => hljs.highlightElement(el));
+  highlightBlocks($("#preview"));
+  renderMermaid($("#preview"));
+}
+
+// syntax-highlight code blocks, leaving ```mermaid for the diagram renderer
+function highlightBlocks(root) {
+  root.querySelectorAll("pre code").forEach((el) => {
+    if (!el.classList.contains("language-mermaid")) hljs.highlightElement(el);
+  });
+}
+
+let mermaidReady = false;
+let mermaidSeq = 0;
+function renderMermaid(root) {
+  const blocks = [...root.querySelectorAll("code.language-mermaid")];
+  if (!blocks.length || !window.mermaid) return;
+  if (!mermaidReady) {
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: "strict",
+      theme: document.body.classList.contains("dark") ? "dark" : "default",
+    });
+    mermaidReady = true;
+  }
+  for (const code of blocks) {
+    const src = code.textContent;
+    const pre = code.closest("pre");
+    const holder = document.createElement("div");
+    holder.className = "mermaid-diagram";
+    pre.replaceWith(holder);
+    mermaid.render("mmd-" + (++mermaidSeq), src)
+      .then(({ svg }) => { holder.innerHTML = svg; })
+      .catch((e) => { holder.innerHTML = `<div class="mermaid-error">Mermaid: ${esc(String(e && e.message || e))}</div>`; });
+  }
 }
 
 function renderStats() {
@@ -357,6 +408,38 @@ async function selectNote(id) {
   renderList();
   renderEditor();
   refreshSuggestions();
+  refreshBacklinks();
+}
+
+// notes whose [[wiki links]] point at the current note
+async function refreshBacklinks() {
+  const box = $("#backlinks");
+  const n = state.current;
+  if (!n || n.trashed) { box.hidden = true; return; }
+  try {
+    const items = await fetch(`/api/notes/${encodeURIComponent(n.id)}/backlinks`).then((r) => r.json());
+    if (!items || !items.length) { box.hidden = true; $("#blList").innerHTML = ""; return; }
+    $("#blCount").textContent = items.length;
+    $("#blList").innerHTML = items.map((it) =>
+      `<a class="bl-item" data-id="${esc(it.id)}"><b>${esc(it.title || "Untitled")}</b> <span class="bl-snip">${esc(it.snippet)}</span></a>`).join("");
+    box.hidden = false;
+  } catch { box.hidden = true; }
+}
+
+// follow a [[wiki link]]: open the matching note by title, or offer to create it
+async function openWikilink(title) {
+  const t = (title || "").trim().toLowerCase();
+  const found = state.notes.find((n) => !n.trashed && (n.title || "").toLowerCase() === t);
+  if (found) { selectNote(found.id); return; }
+  if (!confirm(`No note titled “${title}”. Create it?`)) return;
+  const r = await fetch("/api/notes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title }) });
+  const n = await r.json();
+  n.folder = state.folder || "";
+  state.notes.unshift({ ...n, snippet: "" });
+  state.current = n;
+  renderAll();
+  await saveNow();
+  $("#title").focus();
 }
 
 // offline topic-tag suggestions (server-side TF-IDF); click a chip to accept
@@ -373,6 +456,33 @@ async function refreshSuggestions() {
       `<button class="suggest-chip" data-suggest="${esc(t)}" title="Add tag">${esc(t)}</button>`).join("");
     row.hidden = false;
   } catch { row.hidden = true; }
+}
+
+function renderTemplateMenu() {
+  const menu = $("#tplMenu");
+  if (!state.templates.length) { menu.hidden = true; return; }
+  menu.hidden = false;
+  $("#tplList").innerHTML = `<div class="tpl-head">New from template</div>` +
+    state.templates.map((t, i) => `<button data-tpl="${i}">${esc(t.name)}</button>`).join("");
+}
+
+async function newFromTemplate(tpl) {
+  $("#tplMenu").open = false;
+  const targetFolder = state.folder || "";
+  const r = await fetch("/api/notes", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title: tpl.title || "" }),
+  });
+  const n = await r.json();
+  n.folder = targetFolder;
+  n.body = tpl.body || "";
+  state.notes.unshift({ ...n, snippet: "" });
+  if (state.view === "trash" || state.tag) { state.view = "all"; state.tag = null; }
+  state.q = ""; state.results = null; $("#search").value = "";
+  state.current = n;
+  renderAll();
+  await saveNow();  // persist the template body + folder
+  $("#title").focus();
 }
 
 async function newNote() {
@@ -468,20 +578,97 @@ function setMode(mode, persist = true) {
   if (mode !== "edit") renderPreview();
 }
 
+async function openSettings() {
+  const st = await fetch("/api/settings").then((r) => r.json());
+  $("#setInterval").value = st.backupIntervalHours;
+  $("#setKeep").value = st.backupKeep;
+  renderBackupStatus(st);
+  $("#settingsOverlay").hidden = false;
+}
+function renderBackupStatus(st) {
+  const last = st.lastBackup ? new Date(st.lastBackup).toLocaleString() : "none yet";
+  $("#backupStatus").textContent = `${st.count} backup${st.count === 1 ? "" : "s"} on disk · last: ${last}`;
+}
+async function saveSettings() {
+  const body = {
+    backupIntervalHours: Math.max(1, +$("#setInterval").value || 3),
+    backupKeep: Math.max(1, +$("#setKeep").value || 12),
+  };
+  const st = await fetch("/api/settings", {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  }).then((r) => r.json());
+  renderBackupStatus(st);
+  $("#settingsOverlay").hidden = true;
+}
+async function backupNow() {
+  $("#backupNowBtn").disabled = true;
+  $("#backupNowBtn").textContent = "Backing up…";
+  try {
+    await fetch("/api/backup", { method: "POST" });
+    renderBackupStatus(await fetch("/api/settings").then((r) => r.json()));
+  } finally {
+    $("#backupNowBtn").disabled = false;
+    $("#backupNowBtn").textContent = "Back up now";
+  }
+}
+
 function setTheme(dark) {
   document.body.classList.toggle("dark", dark);
   $("#hljsLight").disabled = dark;
   $("#hljsDark").disabled = !dark;
   $("#themeBtn").textContent = dark ? "☀️" : "🌙";
   localStorage.setItem("pn-theme", dark ? "dark" : "light");
+  mermaidReady = false;                 // re-init mermaid with the new theme
+  if (state.current && state.mode !== "edit") renderPreview();
+}
+
+// parse operators out of the query: tag:, folder:, is:(starred|untagged|trashed), before:, after:
+function parseQuery(raw) {
+  const p = { text: "", tags: [], folders: [], is: [], before: null, after: null };
+  const words = [];
+  for (const tok of raw.split(/\s+/)) {
+    const m = /^(tag|folder|is|before|after):(.+)$/i.exec(tok);
+    if (!m) { if (tok) words.push(tok); continue; }
+    const key = m[1].toLowerCase(), val = m[2];
+    if (key === "tag") p.tags.push(val.toLowerCase());
+    else if (key === "folder") p.folders.push(val.toLowerCase());
+    else if (key === "is") p.is.push(val.toLowerCase());
+    else if (key === "before" || key === "after") {
+      const d = new Date(val);
+      if (!isNaN(d)) p[key] = d;
+    }
+  }
+  p.text = words.join(" ");
+  return p;
+}
+
+function matchesFilters(n, p) {
+  const wantTrash = p.is.includes("trashed") || state.view === "trash";
+  if (wantTrash ? !n.trashed : n.trashed) return false;
+  for (const t of p.tags) if (!n.tags.some((x) => x.toLowerCase() === t)) return false;
+  for (const f of p.folders) {
+    const nf = (n.folder || "").toLowerCase();
+    if (nf !== f && !nf.startsWith(f + "/")) return false;
+  }
+  if (p.is.includes("starred") && !n.starred) return false;
+  if (p.is.includes("untagged") && n.tags.length) return false;
+  if (p.before && new Date(n.updated) >= p.before) return false;
+  if (p.after && new Date(n.updated) < p.after) return false;
+  return true;
 }
 
 async function runSearch() {
-  const q = $("#search").value.trim();
-  state.q = q;
-  if (!q) { state.results = null; renderList(); return; }
-  const r = await fetch("/api/search?q=" + encodeURIComponent(q) + (state.view === "trash" ? "&trash=1" : ""));
-  state.results = await r.json();
+  const raw = $("#search").value.trim();
+  state.q = raw;
+  state.parsed = parseQuery(raw);
+  if (!raw) { state.results = null; renderList(); return; }
+  const wantTrash = state.parsed.is.includes("trashed") || state.view === "trash";
+  if (state.parsed.text) {
+    const r = await fetch("/api/search?q=" + encodeURIComponent(state.parsed.text) + (wantTrash ? "&trash=1" : ""));
+    state.results = await r.json();
+  } else {
+    state.results = null; // operators only — filter all notes locally
+  }
   renderList();
 }
 
@@ -515,6 +702,24 @@ function mdInsertBlock(text) {
   ta.setRangeText(text, ta.selectionStart, ta.selectionEnd, "end");
   ta.focus();
   onBodyInput();
+}
+
+// paste an image from the clipboard -> upload -> insert markdown at the cursor
+async function onPasteImage(e) {
+  const item = [...(e.clipboardData?.items || [])].find((it) => it.type.startsWith("image/"));
+  if (!item || !state.current) return; // let normal text paste through
+  e.preventDefault();
+  const file = item.getAsFile();
+  if (!file) return;
+  setSaveState("saving", "Uploading image…");
+  try {
+    const r = await fetch("/api/attachments", { method: "POST", headers: { "Content-Type": file.type }, body: file });
+    if (!r.ok) { setSaveState("", "Image upload failed"); return; }
+    const { path } = await r.json();
+    mdInsertBlock(`![pasted image](${path})`);
+  } catch {
+    setSaveState("", "Image upload failed");
+  }
 }
 
 function applyMd(kind) {
@@ -662,7 +867,20 @@ function bindEvents() {
     const item = e.target.closest(".note-item");
     if (item) selectNote(item.dataset.id);
   });
+  // wiki-link navigation + backlink items
+  $("#preview").addEventListener("click", (e) => {
+    const w = e.target.closest(".wikilink");
+    if (w) { e.preventDefault(); openWikilink(w.dataset.wikilink); }
+  });
+  $("#blList").addEventListener("click", (e) => {
+    const a = e.target.closest("[data-id]");
+    if (a) selectNote(a.dataset.id);
+  });
   $("#newBtn").addEventListener("click", newNote);
+  $("#tplList").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-tpl]");
+    if (b) newFromTemplate(state.templates[+b.dataset.tpl]);
+  });
   $("#sortSel").addEventListener("change", (e) => {
     state.sort = e.target.value;
     localStorage.setItem("pn-sort", state.sort);
@@ -679,6 +897,7 @@ function bindEvents() {
   // editor
   $("#title").addEventListener("input", scheduleSave);
   $("#mdtext").addEventListener("input", onBodyInput);
+  $("#mdtext").addEventListener("paste", onPasteImage);
   $("#mdtext").addEventListener("keydown", (e) => {
     if (e.key === "Tab") {
       e.preventDefault();
@@ -733,17 +952,29 @@ function bindEvents() {
     if (e.target.id === "cheatOverlay") $("#cheatOverlay").hidden = true;
   });
 
-  // close the export menu on an outside click
+  // close popover menus on an outside click
   document.addEventListener("click", (e) => {
-    const menu = $("#exportMenu");
-    if (menu.open && !menu.contains(e.target)) menu.open = false;
+    for (const id of ["#exportMenu", "#tplMenu"]) {
+      const menu = $(id);
+      if (menu.open && !menu.contains(e.target)) menu.open = false;
+    }
   });
 
   $("#themeBtn").addEventListener("click", () => setTheme(!document.body.classList.contains("dark")));
 
+  // settings modal
+  $("#settingsBtn").addEventListener("click", openSettings);
+  $("#settingsClose").addEventListener("click", () => { $("#settingsOverlay").hidden = true; });
+  $("#settingsOverlay").addEventListener("click", (e) => {
+    if (e.target.id === "settingsOverlay") $("#settingsOverlay").hidden = true;
+  });
+  $("#settingsSave").addEventListener("click", saveSettings);
+  $("#backupNowBtn").addEventListener("click", backupNow);
+
   // global shortcuts
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !$("#cheatOverlay").hidden) { $("#cheatOverlay").hidden = true; return; }
+    if (e.key === "Escape" && !$("#settingsOverlay").hidden) { $("#settingsOverlay").hidden = true; return; }
     const mod = e.ctrlKey || e.metaKey;
     if (mod && e.altKey && e.key.toLowerCase() === "n") { e.preventDefault(); newNote(); }
     else if (mod && e.key.toLowerCase() === "k") { e.preventDefault(); $("#search").focus(); $("#search").select(); }

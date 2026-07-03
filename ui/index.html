@@ -11,6 +11,11 @@
 <script defer src="vendor/marked.min.js"></script>
 <script defer src="vendor/purify.min.js"></script>
 <script defer src="vendor/highlight.min.js"></script>
+<script defer src="vendor/hljs-powershell.min.js"></script>
+<script defer src="vendor/hljs-dockerfile.min.js"></script>
+<script defer src="vendor/hljs-nginx.min.js"></script>
+<script defer src="vendor/hljs-spl.js"></script>
+<script defer src="vendor/mermaid.min.js"></script>
 <script defer src="app.js"></script>
 </head>
 <body>
@@ -37,6 +42,7 @@
     </div>
     <div class="side-foot">
       <button id="themeBtn" title="Toggle dark mode">🌙</button>
+      <button id="settingsBtn" title="Settings">⚙</button>
       <span id="pdfBadge" class="badge" title="">PDF: …</span>
       <span class="ver" id="verLabel"></span>
     </div>
@@ -53,9 +59,14 @@
         <option value="title">Title</option>
       </select>
       <button id="newBtn" title="New note (Ctrl+Alt+N)">+</button>
+      <details id="tplMenu" class="tpl-menu" hidden>
+        <summary title="New from template">▾</summary>
+        <div class="menu" id="tplList"></div>
+      </details>
     </header>
     <div class="searchwrap">
-      <input id="search" type="search" placeholder="Search…  (Ctrl+K)" autocomplete="off">
+      <input id="search" type="search" placeholder="Search…  (Ctrl+K)" autocomplete="off"
+        title="Operators: tag:aws  folder:Work/Runbooks  is:starred  is:untagged  is:trashed  after:2026-06-01  before:2026-07-01">
     </div>
     <div id="notelist"></div>
   </section>
@@ -154,6 +165,11 @@
         <div id="preview" class="markdown"></div>
       </div>
 
+      <div id="backlinks" hidden>
+        <div class="bl-head">🔗 Linked references <span id="blCount"></span></div>
+        <div id="blList"></div>
+      </div>
+
       <footer id="statusbar">
         <span id="stats"></span>
         <span id="noteDates"></span>
@@ -206,7 +222,9 @@
         <table class="cheat">
           <tr><td><code>[text](https://url)</code></td><td>Link</td></tr>
           <tr><td><code>&lt;https://url&gt;</code></td><td>Autolink (bare URLs link too)</td></tr>
-          <tr><td><code>![alt](path/to/img.png)</code></td><td>Image</td></tr>
+          <tr><td><code>![alt](path/to/img.png)</code></td><td>Image (or just paste a screenshot)</td></tr>
+          <tr><td><code>[[Note Title]]</code></td><td>Wiki-link to another note <span class="cheat-note">(Portanote)</span></td></tr>
+          <tr><td><code>```mermaid</code></td><td>Render a Mermaid diagram <span class="cheat-note">(Portanote)</span></td></tr>
         </table>
       </section>
 
@@ -241,6 +259,30 @@
         </table>
       </section>
 
+    </div>
+  </div>
+</div>
+
+<div id="settingsOverlay" hidden>
+  <div class="modal-card" role="dialog" aria-label="Settings">
+    <header class="cheat-head">
+      <h2>Settings</h2>
+      <button id="settingsClose" title="Close (Esc)">✕</button>
+    </header>
+    <div class="settings-body">
+      <h3>Automatic backups</h3>
+      <p class="settings-desc">Zips your whole notes folder into <code>backups/</code> on a schedule (the <code>backups/</code> folder itself is excluded).</p>
+      <label class="setting-row">Back up every
+        <input id="setInterval" type="number" min="1" max="168" step="1"> hours
+      </label>
+      <label class="setting-row">Keep the last
+        <input id="setKeep" type="number" min="1" max="500" step="1"> backups
+      </label>
+      <div class="settings-status" id="backupStatus"></div>
+      <div class="settings-actions">
+        <button id="backupNowBtn" class="btn-secondary">Back up now</button>
+        <button id="settingsSave" class="btn-primary">Save</button>
+      </div>
     </div>
   </div>
 </div>

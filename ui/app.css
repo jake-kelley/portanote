@@ -76,6 +76,16 @@ input,select,textarea{font:inherit;color:inherit;}
 #newBtn{width:30px;height:30px;border-radius:50%;background:var(--accent);color:#fff;
   font-size:19px;line-height:1;font-weight:600;}
 #newBtn:hover{filter:brightness(1.1);}
+.tpl-menu{position:relative;}
+.tpl-menu summary{list-style:none;cursor:pointer;color:var(--muted);font-size:12px;padding:6px 2px;}
+.tpl-menu summary::-webkit-details-marker{display:none;}
+.tpl-menu summary:hover{color:var(--accent);}
+.tpl-menu .menu{position:absolute;right:0;top:28px;z-index:50;background:var(--bg);border:1px solid var(--line);
+  border-radius:10px;box-shadow:0 8px 24px rgba(16,24,40,.14);padding:6px;width:190px;}
+.tpl-menu .menu button{display:block;width:100%;text-align:left;padding:7px 10px;border-radius:6px;font-size:13px;}
+.tpl-menu .menu button:hover{background:var(--bg3);}
+.tpl-menu .menu .tpl-head{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);
+  font-weight:800;padding:2px 10px 5px;}
 .searchwrap{padding:0 14px 10px 14px;}
 #search{width:100%;padding:8px 12px;border:1px solid var(--line);border-radius:8px;
   background:var(--bg2);outline:none;}
@@ -186,6 +196,25 @@ table.cheat code{background:var(--chip);border:1px solid var(--chip-line);border
 .cheat-note{font-size:11px;color:var(--muted);font-weight:600;}
 .cheat-tip{font-size:11.5px;color:var(--muted);margin:6px 2px 0;}
 
+/* settings modal */
+#settingsBtn{font-size:14px;}
+#settingsOverlay{position:fixed;inset:0;background:rgba(16,24,40,.5);z-index:100;display:flex;
+  align-items:center;justify-content:center;padding:24px;}
+.modal-card{background:var(--bg);border:1px solid var(--line);border-radius:14px;width:min(460px,100%);
+  max-height:86vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.35);}
+.settings-body{padding:14px 22px 20px;overflow-y:auto;}
+.settings-body h3{margin:6px 0 4px;font-size:14px;}
+.settings-desc{color:var(--muted);font-size:12.5px;margin:0 0 12px;}
+.setting-row{display:flex;align-items:center;gap:8px;font-size:13.5px;margin:8px 0;}
+.setting-row input{width:64px;border:1px solid var(--line);border-radius:6px;padding:5px 8px;background:var(--bg2);color:var(--ink);}
+.settings-status{font-size:12px;color:var(--muted);margin:14px 0 2px;padding-top:12px;border-top:1px solid var(--line);}
+.settings-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px;}
+.btn-primary{background:var(--accent);color:#fff;border-radius:7px;padding:8px 16px;font-weight:700;font-size:13px;}
+.btn-primary:hover{background:var(--accent-d);}
+.btn-secondary{border:1px solid var(--line);border-radius:7px;padding:8px 14px;font-size:13px;color:var(--ink);}
+.btn-secondary:hover{background:var(--bg3);}
+.btn-secondary:disabled{opacity:.5;cursor:not-allowed;}
+
 #panes{flex:1;display:flex;min-height:0;}
 #mdtext{flex:1;resize:none;border:none;outline:none;background:var(--bg);color:var(--ink);
   padding:18px 22px;font-family:"SFMono-Regular",Consolas,Menlo,monospace;font-size:13.5px;
@@ -222,3 +251,15 @@ table.cheat code{background:var(--chip);border:1px solid var(--chip-line);border
 .markdown hr{border:none;border-top:1px solid var(--line);margin:1.4em 0;}
 .markdown ul,.markdown ol{padding-left:26px;}
 .markdown input[type=checkbox]{margin-right:6px;}
+.wikilink{color:var(--accent);text-decoration:none;border-bottom:1px dashed var(--accent);cursor:pointer;}
+.wikilink:hover{background:var(--accent-soft);border-radius:2px;}
+#backlinks{border-top:1px solid var(--line);background:var(--bg2);padding:8px 22px 10px;max-height:160px;overflow-y:auto;flex:none;}
+.bl-head{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);font-weight:800;margin-bottom:5px;}
+.bl-item{display:block;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:13px;text-decoration:none;color:var(--ink);}
+.bl-item:hover{background:var(--bg3);}
+.bl-item .bl-snip{color:var(--muted);font-size:12px;}
+.mermaid-diagram{margin:1em 0;text-align:center;overflow-x:auto;}
+.mermaid-diagram svg{max-width:100%;height:auto;}
+.mermaid-error{border-left:3px solid var(--danger);background:#fdeeec;color:#8c2f33;
+  padding:8px 12px;border-radius:0 6px 6px 0;font-size:12.5px;font-family:Consolas,monospace;}
+body.dark .mermaid-error{background:#3a1d1f;color:#e8b4b6;}

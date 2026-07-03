@@ -51,6 +51,7 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Printf("portanote v%s — %d notes loaded from %s", version, store.Count(), notesDir)
+	store.StartBackups()
 
 	uiFS, err := fs.Sub(uiEmbed, "ui")
 	if err != nil {

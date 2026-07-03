@@ -8,8 +8,13 @@ A portable, Standard Notes–style markdown notes app in a **single ~7 MB binary
 
 - **Three-pane UI** like Standard Notes: a **collapsible nested-folder tree** + tags sidebar · searchable note list · markdown editor with live preview (edit / split / preview), dark mode, starring, trash.
 - **Full GitHub-Flavored Markdown editor**: a formatting toolbar (headings, **bold**/*italic*/~~strike~~, lists, task lists, tables, code, links/images) and a built-in **Markdown quick-reference** (the `❔` button).
+- **Syntax highlighting** for the common languages plus **PowerShell, Splunk SPL, Dockerfile, and nginx**, and **Mermaid diagrams** (```` ```mermaid ````) rendered live in preview and in exports.
+- **Wiki-links & backlinks**: `[[Note Title]]` links notes together (with `[[Title|alias]]`); each note shows a "Linked references" panel of what points to it.
+- **Paste-to-attach**: paste a screenshot straight into a note — it's saved under `attachments/` and inserted as an image.
+- **Note templates**: a `templates/` folder of reusable skeletons (Meeting Notes, Runbook, Daily Log seeded to start) available from the `▾` next to the new-note button.
 - **Auto-tag suggestions**: an offline TF-IDF pass over your note **titles and headers** proposes topic tags under the tag row — one click to accept. Your manual add/remove stays in control, and no note content ever leaves your machine.
-- **Fast search-as-you-type**: in-memory BM25 full-text index with prefix matching and title/tag boosting, plus substring fallback. Instant at personal-collection scale.
+- **Fast search with operators**: in-memory BM25 full-text search, plus operators — `tag:aws`, `folder:Work/Runbooks`, `is:starred`/`is:untagged`/`is:trashed`, `after:2026-06-01`, `before:2026-07-01`.
+- **Automatic backups**: zips the whole notes folder on a schedule (default every 3 hours, keep the last 12), adjustable in the ⚙ settings menu with a "Back up now" button.
 - **Eisvogel PDF export**, two ways:
   1. **Built-in (zero dependencies):** an Eisvogel-styled print view → browser *Save as PDF*. Works everywhere, immediately.
   2. **True Eisvogel (pandoc):** drop portable `pandoc` + `tectonic` into `tools/` (script provided) and export real LaTeX PDFs — running headers, listings code blocks, and a toggleable front title page and table of contents.

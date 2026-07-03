@@ -76,11 +76,13 @@ func slugify(s string) string {
 }
 
 type Store struct {
-	dir     string
-	mu      sync.RWMutex
-	notes   map[string]*Note
-	idx     *Index
-	folders []string // ordered folder names (persisted so empty folders survive)
+	dir      string
+	mu       sync.RWMutex
+	notes    map[string]*Note
+	idx      *Index
+	folders  []string // ordered folder names (persisted so empty folders survive)
+	settings Settings
+	setMu    sync.Mutex
 }
 
 type FolderInfo struct {
@@ -124,6 +126,8 @@ func NewStore(dir string) (*Store, error) {
 		s.idx.Put(n.ID, n.Title, n.Tags, n.Body)
 	}
 	s.loadFolders()
+	s.seedTemplates()
+	s.loadSettings()
 	return s, nil
 }
 
@@ -273,6 +277,38 @@ func (s *Store) Delete(id string) error {
 	delete(s.notes, id)
 	s.idx.Remove(id)
 	return nil
+}
+
+// [[Note Title]] or [[Note Title|alias]]
+var wikilinkRe = regexp.MustCompile(`\[\[([^\]|]+)(?:\|[^\]]*)?\]\]`)
+
+// Backlinks returns the (non-trashed) notes whose body contains a [[wiki link]]
+// to the given note's title.
+func (s *Store) Backlinks(id string) []ListItem {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	target, ok := s.notes[id]
+	if !ok {
+		return []ListItem{}
+	}
+	tt := strings.ToLower(strings.TrimSpace(target.Title))
+	out := []ListItem{}
+	if tt == "" {
+		return out
+	}
+	for _, n := range s.notes {
+		if n.ID == id || n.Trashed {
+			continue
+		}
+		for _, m := range wikilinkRe.FindAllStringSubmatch(n.Body, -1) {
+			if strings.ToLower(strings.TrimSpace(m[1])) == tt {
+				out = append(out, ListItem{Meta: n.Meta, Snippet: snippet(n.Body, 120)})
+				break
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Updated.After(out[j].Updated) })
+	return out
 }
 
 // ---------------------------------------------------------------- search

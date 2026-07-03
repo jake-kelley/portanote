@@ -1,13 +1,26 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"io/fs"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
+
+var attachRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
+// image mime -> file extension (svg intentionally excluded — script vector)
+var imgExt = map[string]string{
+	"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp",
+}
 
 func newAPI(store *Store, uiFS fs.FS) http.Handler {
 	mux := http.NewServeMux()
@@ -85,6 +98,33 @@ func newAPI(store *Store, uiFS fs.FS) http.Handler {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
+	mux.HandleFunc("GET /api/templates", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, store.Templates())
+	})
+
+	mux.HandleFunc("GET /api/settings", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, store.BackupStatus())
+	})
+
+	mux.HandleFunc("PUT /api/settings", func(w http.ResponseWriter, r *http.Request) {
+		var in Settings
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
+		store.SaveSettings(in)
+		writeJSON(w, http.StatusOK, store.BackupStatus())
+	})
+
+	mux.HandleFunc("POST /api/backup", func(w http.ResponseWriter, r *http.Request) {
+		name, err := store.Backup()
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]string{"name": name})
+	})
+
 	mux.HandleFunc("GET /api/folders", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, store.Folders())
 	})
@@ -129,6 +169,46 @@ func newAPI(store *Store, uiFS fs.FS) http.Handler {
 
 	mux.HandleFunc("GET /api/notes/{id}/suggest-tags", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string][]string{"tags": store.SuggestTags(r.PathValue("id"), 6)})
+	})
+
+	mux.HandleFunc("GET /api/notes/{id}/backlinks", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, store.Backlinks(r.PathValue("id")))
+	})
+
+	// image attachments (pasted screenshots etc.), stored in <notes>/attachments
+	attachDir := filepath.Join(store.dir, "attachments")
+	mux.HandleFunc("POST /api/attachments", func(w http.ResponseWriter, r *http.Request) {
+		ext := imgExt[strings.ToLower(strings.TrimSpace(strings.Split(r.Header.Get("Content-Type"), ";")[0]))]
+		if ext == "" {
+			writeErr(w, http.StatusUnsupportedMediaType, errors.New("only png, jpeg, gif, webp images are accepted"))
+			return
+		}
+		data, err := io.ReadAll(io.LimitReader(r.Body, 25<<20)) // 25 MB cap
+		if err != nil || len(data) == 0 {
+			writeErr(w, http.StatusBadRequest, errors.New("empty or unreadable upload"))
+			return
+		}
+		if err := os.MkdirAll(attachDir, 0o755); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		b := make([]byte, 4)
+		rand.Read(b)
+		name := time.Now().UTC().Format("20060102-150405") + "-" + hex.EncodeToString(b) + "." + ext
+		if err := os.WriteFile(filepath.Join(attachDir, name), data, 0o644); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]string{"path": "attachments/" + name})
+	})
+
+	mux.HandleFunc("GET /attachments/{name}", func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("name")
+		if !attachRe.MatchString(name) {
+			http.NotFound(w, r)
+			return
+		}
+		http.ServeFile(w, r, filepath.Join(attachDir, name))
 	})
 
 	mux.HandleFunc("GET /api/search", func(w http.ResponseWriter, r *http.Request) {

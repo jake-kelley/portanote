@@ -2,11 +2,17 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<base href="/">
 <title>Export</title>
 <link rel="stylesheet" href="/vendor/hljs-github.min.css">
 <script src="/vendor/marked.min.js"></script>
 <script src="/vendor/purify.min.js"></script>
 <script src="/vendor/highlight.min.js"></script>
+<script src="/vendor/hljs-powershell.min.js"></script>
+<script src="/vendor/hljs-dockerfile.min.js"></script>
+<script src="/vendor/hljs-nginx.min.js"></script>
+<script src="/vendor/hljs-spl.js"></script>
+<script src="/vendor/mermaid.min.js"></script>
 <style>
 /* Eisvogel-inspired print styling. True Eisvogel output comes from the
    pandoc path; this view aims for the same feel via the browser's
@@ -60,6 +66,8 @@ article th{border-top:1.2pt solid #333;border-bottom:.8pt solid #333;padding:4pt
 article td{border-bottom:.4pt solid #ccc;padding:4pt 8pt;vertical-align:top;}
 article tr:last-child td{border-bottom:1.2pt solid #333;}
 article img{max-width:100%;}
+.mermaid-diagram{margin:1em 0;text-align:center;page-break-inside:avoid;}
+.mermaid-diagram svg{max-width:100%;height:auto;}
 article hr{border:none;border-top:.5pt solid #999;margin:1.5em 0;}
 article ul,article ol{padding-left:22pt;margin:.5em 0;}
 article li{margin:.15em 0;}
@@ -100,15 +108,40 @@ article li{margin:.15em 0;}
   document.getElementById("pdate").textContent = new Date(n.updated)
     .toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
 
-  marked.use({ gfm: true, breaks: true });
+  marked.use({
+    gfm: true, breaks: true,
+    extensions: [{
+      name: "wikilink", level: "inline",
+      start(src) { return src.indexOf("[["); },
+      tokenizer(src) {
+        const m = /^\[\[([^\]|]+)(?:\|([^\]]*))?\]\]/.exec(src);
+        if (m) return { type: "wikilink", raw: m[0], label: (m[2] || m[1]).trim() };
+      },
+      renderer(token) { return token.label; },  // print: plain text, no navigation
+    }],
+  });
   const html = DOMPurify.sanitize(marked.parse(n.body || ""), { ADD_TAGS: ["input"], ADD_ATTR: ["type", "checked", "disabled"] });
   const article = document.getElementById("content");
   article.innerHTML = html;
-  article.querySelectorAll("pre code").forEach((el) => hljs.highlightElement(el));
+  article.querySelectorAll("pre code").forEach((el) => {
+    if (!el.classList.contains("language-mermaid")) hljs.highlightElement(el);
+  });
+
+  // render any Mermaid diagrams before printing
+  const mblocks = [...article.querySelectorAll("code.language-mermaid")];
+  if (mblocks.length && window.mermaid) {
+    mermaid.initialize({ startOnLoad: false, securityLevel: "strict" });
+    await Promise.all(mblocks.map(async (code, i) => {
+      const holder = document.createElement("div");
+      holder.className = "mermaid-diagram";
+      code.closest("pre").replaceWith(holder);
+      try { holder.innerHTML = (await mermaid.render("pmmd-" + i, code.textContent)).svg; } catch {}
+    }));
+  }
 
   document.getElementById("printBtn").addEventListener("click", () => window.print());
-  // give fonts/highlighting a beat, then open the dialog automatically
-  setTimeout(() => window.print(), 500);
+  // give fonts/highlighting/diagrams a beat, then open the dialog automatically
+  setTimeout(() => window.print(), mblocks.length ? 900 : 500);
 })();
 </script>
 </body>
