@@ -83,6 +83,8 @@ type Store struct {
 	folders  []string // ordered folder names (persisted so empty folders survive)
 	settings Settings
 	setMu    sync.Mutex
+	sync     SyncState
+	syncMu   sync.Mutex
 }
 
 type FolderInfo struct {
@@ -128,6 +130,7 @@ func NewStore(dir string) (*Store, error) {
 	s.loadFolders()
 	s.seedTemplates()
 	s.loadSettings()
+	s.loadSync()
 	return s, nil
 }
 

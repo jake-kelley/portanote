@@ -200,8 +200,23 @@ table.cheat code{background:var(--chip);border:1px solid var(--chip-line);border
 #settingsBtn{font-size:14px;}
 #settingsOverlay{position:fixed;inset:0;background:rgba(16,24,40,.5);z-index:100;display:flex;
   align-items:center;justify-content:center;padding:24px;}
-.modal-card{background:var(--bg);border:1px solid var(--line);border-radius:14px;width:min(460px,100%);
+.modal-card{background:var(--bg);border:1px solid var(--line);border-radius:14px;width:min(540px,100%);
   max-height:86vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.35);}
+.sync-add{border-top:1px solid var(--line);margin-top:14px;padding-top:12px;}
+.sync-add input,.sync-add select{border:1px solid var(--line);border-radius:6px;padding:6px 8px;
+  background:var(--bg2);color:var(--ink);font-size:12.5px;}
+#syncAddURL{width:100%;margin:6px 0;}
+.sync-add-row{display:flex;gap:8px;align-items:center;}
+.sync-folder{border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin:10px 0;background:var(--bg2);}
+.sf-head{display:flex;align-items:center;gap:8px;font-size:13.5px;}
+.sf-head .sf-unlink{margin-left:auto;font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:5px;padding:1px 7px;}
+.sf-head .sf-unlink:hover{color:var(--danger);border-color:var(--danger);}
+.sf-remote{font-size:11px;color:var(--muted);font-family:Consolas,monospace;margin:3px 0 8px;word-break:break-all;}
+.sf-row{display:flex;gap:8px;align-items:center;margin:6px 0;flex-wrap:wrap;}
+.sf-row select,.sf-row input{border:1px solid var(--line);border-radius:6px;padding:5px 8px;background:var(--bg);color:var(--ink);font-size:12.5px;}
+.sf-msg{flex:1;min-width:120px;}
+.sf-log{background:var(--nav);color:#dfe7ef;font-size:10.5px;font-family:Consolas,monospace;
+  border-radius:6px;padding:8px 10px;margin-top:8px;max-height:150px;overflow:auto;white-space:pre-wrap;}
 .settings-body{padding:14px 22px 20px;overflow-y:auto;}
 .settings-body h3{margin:6px 0 4px;font-size:14px;}
 .settings-desc{color:var(--muted);font-size:12.5px;margin:0 0 12px;}

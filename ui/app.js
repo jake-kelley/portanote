@@ -65,8 +65,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   renderAll();
 
   // deep link: /?q=<query> pre-fills the search (operators work too)
-  const q = new URLSearchParams(location.search).get("q");
+  const params = new URLSearchParams(location.search);
+  const q = params.get("q");
   if (q) { $("#search").value = q; runSearch(); }
+  if (params.get("settings") === "1") openSettings();
 
   // deep link: /#<note-id> opens that note (and refresh keeps it open)
   const hashId = decodeURIComponent(location.hash.slice(1));
@@ -583,7 +585,58 @@ async function openSettings() {
   $("#setInterval").value = st.backupIntervalHours;
   $("#setKeep").value = st.backupKeep;
   renderBackupStatus(st);
+  refreshSync();
   $("#settingsOverlay").hidden = false;
+}
+
+// ---- Git sync UI ----
+async function refreshSync() {
+  const st = await fetch("/api/sync").then((r) => r.json());
+  $("#gitUnavailable").hidden = st.gitAvailable;
+  $("#gitAuthBox").style.display = st.gitAvailable ? "" : "none";
+  $("#gitUser").value = st.username || "";
+  $("#gitToken").placeholder = st.hasToken ? "•••••• saved (blank = keep)" : "glpat-…";
+  const folders = st.folders || [];
+  const synced = new Set(folders.map((f) => f.path));
+  $("#syncFolders").innerHTML = folders.map((f, i) => `
+    <div class="sync-folder" data-path="${esc(f.path)}">
+      <div class="sf-head">📁 <b>${esc(f.path)}</b> <button class="sf-unlink">unlink</button></div>
+      <div class="sf-remote">${esc(f.remoteUrl)}</div>
+      <div class="sf-row">
+        <span>Branch</span>
+        <input class="sf-branch" value="${esc(f.branch)}" list="brdl-${i}" style="width:140px">
+        <datalist id="brdl-${i}"></datalist>
+        <button class="sf-branches btn-secondary">List branches</button>
+        <button class="sf-pull btn-secondary">⬇ Pull</button>
+      </div>
+      <div class="sf-row">
+        <input class="sf-msg" placeholder="commit message (optional)">
+        <button class="sf-push btn-primary">⬆ Commit &amp; Push</button>
+      </div>
+      <pre class="sf-log" hidden></pre>
+    </div>`).join("");
+  const avail = state.folders.filter((p) => !synced.has(p));
+  $("#syncAddFolder").innerHTML = avail.length
+    ? avail.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`).join("")
+    : `<option value="">(make a folder first)</option>`;
+}
+
+async function setSyncBranch(path, branch) {
+  await fetch("/api/sync/branch", {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, branch }),
+  });
+}
+
+// a pull can import new/changed notes — refresh the local view
+async function reloadNotes() {
+  const [notes, folders] = await Promise.all([
+    fetch("/api/notes").then((r) => r.json()),
+    fetch("/api/folders").then((r) => r.json()),
+  ]);
+  state.notes = notes;
+  state.folders = folders.map((f) => f.name);
+  renderAll();
 }
 function renderBackupStatus(st) {
   const last = st.lastBackup ? new Date(st.lastBackup).toLocaleString() : "none yet";
@@ -970,6 +1023,59 @@ function bindEvents() {
   });
   $("#settingsSave").addEventListener("click", saveSettings);
   $("#backupNowBtn").addEventListener("click", backupNow);
+
+  // git sync
+  $("#gitAuthSave").addEventListener("click", async () => {
+    await fetch("/api/sync/auth", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: $("#gitUser").value, token: $("#gitToken").value }),
+    });
+    $("#gitToken").value = "";
+    refreshSync();
+  });
+  $("#syncAddBtn").addEventListener("click", async () => {
+    const path = $("#syncAddFolder").value, url = $("#syncAddURL").value.trim();
+    const branch = $("#syncAddBranch").value.trim() || "main";
+    if (!path || !url) { alert("Pick a folder and enter a repo URL."); return; }
+    await fetch("/api/sync/folder", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, remoteUrl: url, branch }),
+    });
+    $("#syncAddURL").value = ""; $("#syncAddBranch").value = "";
+    refreshSync();
+  });
+  $("#syncFolders").addEventListener("click", async (e) => {
+    const card = e.target.closest(".sync-folder");
+    if (!card) return;
+    const path = card.dataset.path;
+    const branch = card.querySelector(".sf-branch").value;
+    const log = card.querySelector(".sf-log");
+    const btn = e.target.closest("button");
+    const show = (r) => { log.hidden = false; log.textContent = (r.error ? "⚠ " + r.error + "\n\n" : "") + (r.log || ""); };
+    if (e.target.classList.contains("sf-unlink")) {
+      if (!confirm(`Unlink “${path}” from Git? Removes the local clone; your notes stay.`)) return;
+      await fetch("/api/sync/folder", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path }) });
+      refreshSync();
+    } else if (e.target.classList.contains("sf-branches")) {
+      btn.disabled = true; btn.textContent = "…";
+      const r = await fetch("/api/sync/branches?path=" + encodeURIComponent(path)).then((x) => x.json());
+      if (r.branches) card.querySelector("datalist").innerHTML = r.branches.map((b) => `<option value="${esc(b)}">`).join("");
+      else show(r);
+      btn.disabled = false; btn.textContent = "List branches";
+    } else if (e.target.classList.contains("sf-pull")) {
+      await setSyncBranch(path, branch);
+      btn.disabled = true; btn.textContent = "Pulling…";
+      show(await fetch("/api/sync/pull", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path }) }).then((x) => x.json()));
+      btn.disabled = false; btn.textContent = "⬇ Pull";
+      await reloadNotes();
+    } else if (e.target.classList.contains("sf-push")) {
+      await setSyncBranch(path, branch);
+      const message = card.querySelector(".sf-msg").value;
+      btn.disabled = true; btn.textContent = "Pushing…";
+      show(await fetch("/api/sync/push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path, message }) }).then((x) => x.json()));
+      btn.disabled = false; btn.textContent = "⬆ Commit & Push";
+    }
+  });
 
   // global shortcuts
   document.addEventListener("keydown", (e) => {

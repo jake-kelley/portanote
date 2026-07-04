@@ -283,6 +283,25 @@
         <button id="backupNowBtn" class="btn-secondary">Back up now</button>
         <button id="settingsSave" class="btn-primary">Save</button>
       </div>
+
+      <h3 style="margin-top:22px">Git sync (GitLab)</h3>
+      <p class="settings-desc">Manually pull / push a folder to a Git repo. Your token is stored locally (<code>0600</code>) and sent as HTTPS auth. No automatic pushing — you control it with the buttons.</p>
+      <div id="gitUnavailable" class="settings-desc" hidden>⚠ <code>git</code> was not found on your PATH — sync is disabled. Install git to enable it.</div>
+      <div id="gitAuthBox">
+        <label class="setting-row">User&nbsp; <input id="gitUser" placeholder="oauth2" style="width:130px"></label>
+        <label class="setting-row">Token <input id="gitToken" type="password" placeholder="glpat-…  (blank = keep current)" style="width:210px"></label>
+        <div class="settings-actions"><button id="gitAuthSave" class="btn-secondary">Save token</button></div>
+        <div id="syncFolders"></div>
+        <div class="sync-add">
+          <div class="cmlabel">Link a folder to a repo</div>
+          <select id="syncAddFolder"></select>
+          <input id="syncAddURL" placeholder="https://gitlab.example.com/team/notes.git  (or …/notes.wiki.git)">
+          <div class="sync-add-row">
+            <input id="syncAddBranch" placeholder="main" style="width:110px">
+            <button id="syncAddBtn" class="btn-secondary">Link folder</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
