@@ -95,6 +95,15 @@ input,select,textarea{font:inherit;color:inherit;}
   border-left:3px solid transparent;}
 .note-item:hover{background:var(--bg2);}
 .note-item.active{background:var(--accent-soft);border-left-color:var(--accent);}
+.note-item.selected{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent);}
+.note-item.selected.active{background:var(--accent-soft);}
+#bulkbar{display:flex;align-items:center;gap:6px;padding:6px 14px;background:var(--accent-soft);
+  border-bottom:1px solid var(--line);}
+#bulkCount{font-size:12.5px;font-weight:700;color:var(--accent);margin-right:auto;}
+#bulkFolder{border:1px solid var(--line);border-radius:6px;background:var(--bg);font-size:12px;padding:3px 4px;color:var(--ink);}
+#bulkbar button{font-size:13px;padding:3px 7px;border-radius:6px;}
+#bulkbar button:hover{background:var(--bg);}
+.drop-hover{outline:2px dashed var(--accent);outline-offset:-2px;background:var(--accent-soft) !important;}
 .ni-top{display:flex;align-items:baseline;gap:6px;}
 .ni-title{font-weight:700;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;}
 .ni-star{color:var(--star);font-size:12px;}

@@ -13,6 +13,9 @@ const state = {
   folders: [],          // all folder paths ("Work/Projects/Alpha")
   collapsed: new Set(JSON.parse(localStorage.getItem("pn-folders-collapsed") || "[]")),
   templates: [],
+  selected: new Set(),  // multi-selected note ids
+  lastClicked: null,
+  dragging: null,
   q: "",
   results: null,        // search results when q is non-empty
   current: null,        // full Note being edited
@@ -254,6 +257,9 @@ function renderSidebar() {
 
 function renderList() {
   const list = visibleNotes();
+  // drop selections that are no longer visible
+  for (const id of [...state.selected]) if (!list.some((n) => n.id === id)) state.selected.delete(id);
+  renderBulkBar();
   $("#listTitle").textContent = state.folder ? state.folder : state.tag ? "#" + state.tag :
     { all: "Notes", starred: "Starred", untagged: "Untagged", trash: "Trash" }[state.view];
 
@@ -270,7 +276,8 @@ function renderList() {
   $("#notelist").innerHTML = list.map((n) => {
     const title = hl ? highlight(n.title || "Untitled", hl) : esc(n.title || "Untitled");
     const snip = hl ? highlight(n.snippet, hl) : esc(n.snippet);
-    return `<div class="note-item ${state.current?.id === n.id ? "active" : ""}" data-id="${esc(n.id)}">
+    const cls = (state.current?.id === n.id ? " active" : "") + (state.selected.has(n.id) ? " selected" : "");
+    return `<div class="note-item${cls}" data-id="${esc(n.id)}" draggable="true">
       <div class="ni-top"><span class="ni-title">${title}</span>${n.starred ? '<span class="ni-star">★</span>' : ""}</div>
       ${snip ? `<div class="ni-snippet">${snip}</div>` : ""}
       <div class="ni-date">${fmtDate(n.updated, true)}</div>
@@ -466,6 +473,66 @@ function renderTemplateMenu() {
   menu.hidden = false;
   $("#tplList").innerHTML = `<div class="tpl-head">New from template</div>` +
     state.templates.map((t, i) => `<button data-tpl="${i}">${esc(t.name)}</button>`).join("");
+}
+
+/* ---- multi-select + drag-and-drop ---- */
+
+function renderBulkBar() {
+  const bar = $("#bulkbar");
+  if (!state.selected.size) { bar.hidden = true; return; }
+  bar.hidden = false;
+  $("#bulkCount").textContent = state.selected.size + " selected";
+  $("#bulkFolder").innerHTML = `<option value="">Move to…</option><option value="__none__">(no folder)</option>` +
+    folderOrder().map((f) => `<option value="${esc(f.path)}">${"  ".repeat(f.depth)}${esc(f.name)}</option>`).join("");
+}
+
+function toggleSelect(id) {
+  if (state.selected.has(id)) state.selected.delete(id); else state.selected.add(id);
+  state.lastClicked = id;
+  renderList();
+}
+
+function rangeSelect(id) {
+  const ids = visibleNotes().map((n) => n.id);
+  const to = ids.indexOf(id);
+  const from = state.lastClicked ? ids.indexOf(state.lastClicked) : to;
+  if (from < 0 || to < 0) { state.selected.add(id); }
+  else { const [a, b] = from < to ? [from, to] : [to, from]; for (let i = a; i <= b; i++) state.selected.add(ids[i]); }
+  renderList();
+}
+
+// apply the same patch to a set of notes (bulk star/trash/move)
+async function bulkApplyTo(ids, patch) {
+  if (!ids || !ids.length) return;
+  await Promise.all(ids.map((id) =>
+    fetch("/api/notes/" + encodeURIComponent(id), {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch),
+    })));
+  state.selected.clear();
+  await reloadNotes();
+}
+const bulkApply = (patch) => bulkApplyTo([...state.selected], patch);
+const moveNotes = (ids, folder) => bulkApplyTo(ids, { folder });
+
+// generic drop target: highlights on dragover, calls onDrop(target, ids) on drop
+function bindDropTarget(container, selector, onDrop) {
+  container.addEventListener("dragover", (e) => {
+    const t = e.target.closest(selector);
+    if (t && state.dragging) { e.preventDefault(); t.classList.add("drop-hover"); }
+  });
+  container.addEventListener("dragleave", (e) => {
+    const t = e.target.closest(selector);
+    if (t) t.classList.remove("drop-hover");
+  });
+  container.addEventListener("drop", (e) => {
+    const t = e.target.closest(selector);
+    if (!t || !state.dragging) return;
+    e.preventDefault();
+    t.classList.remove("drop-hover");
+    const ids = state.dragging;
+    state.dragging = null;
+    onDrop(t, ids);
+  });
 }
 
 async function newFromTemplate(tpl) {
@@ -915,11 +982,27 @@ function bindEvents() {
   $("#newFolderBtn").addEventListener("click", () => createFolderFlow(false, ""));
   $("#folderSel").addEventListener("change", onFolderSelect);
 
-  // list
+  // list: click (open), Ctrl/Cmd+click (toggle), Shift+click (range)
   $("#notelist").addEventListener("click", (e) => {
     const item = e.target.closest(".note-item");
-    if (item) selectNote(item.dataset.id);
+    if (!item) return;
+    const id = item.dataset.id;
+    if (e.ctrlKey || e.metaKey) { toggleSelect(id); return; }
+    if (e.shiftKey) { rangeSelect(id); return; }
+    if (state.selected.size) { state.selected.clear(); renderList(); }
+    selectNote(id);
   });
+  // drag notes -> drop onto a folder (move) or the Trash view
+  $("#notelist").addEventListener("dragstart", (e) => {
+    const item = e.target.closest(".note-item");
+    if (!item) return;
+    const id = item.dataset.id;
+    state.dragging = state.selected.has(id) ? [...state.selected] : [id];
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", state.dragging.join(","));
+  });
+  bindDropTarget($("#folderlist"), "a[data-folder]", (a, ids) => moveNotes(ids, a.dataset.folder));
+  bindDropTarget($("#views"), 'a[data-view="trash"]', (_, ids) => bulkApplyTo(ids, { trashed: true }));
   // wiki-link navigation + backlink items
   $("#preview").addEventListener("click", (e) => {
     const w = e.target.closest(".wikilink");
@@ -929,6 +1012,14 @@ function bindEvents() {
     const a = e.target.closest("[data-id]");
     if (a) selectNote(a.dataset.id);
   });
+  // bulk-action bar
+  $("#bulkFolder").addEventListener("change", (e) => {
+    if (e.target.value) bulkApply({ folder: e.target.value === "__none__" ? "" : e.target.value });
+  });
+  $("#bulkStar").addEventListener("click", () => bulkApply({ starred: true }));
+  $("#bulkTrash").addEventListener("click", () => bulkApply({ trashed: true }));
+  $("#bulkClear").addEventListener("click", () => { state.selected.clear(); renderList(); });
+
   $("#newBtn").addEventListener("click", newNote);
   $("#tplList").addEventListener("click", (e) => {
     const b = e.target.closest("[data-tpl]");
