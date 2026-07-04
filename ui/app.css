@@ -239,6 +239,38 @@ table.cheat code{background:var(--chip);border:1px solid var(--chip-line);border
 .btn-secondary:hover{background:var(--bg3);}
 .btn-secondary:disabled{opacity:.5;cursor:not-allowed;}
 
+/* ---------------- board / to-do ---------------- */
+#boardpane{flex:1;overflow:auto;background:var(--bg2);min-width:0;}
+.board{display:flex;gap:14px;padding:18px;align-items:flex-start;min-height:100%;}
+.kcol{background:var(--bg3);border:1px solid var(--line);border-radius:12px;width:300px;min-width:260px;
+  flex:1;display:flex;flex-direction:column;max-height:calc(100vh - 60px);}
+.kcol-head{font-weight:800;font-size:13px;padding:12px 14px 8px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);}
+.kcount{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:0 7px;font-size:11px;margin-left:4px;}
+.kcards{flex:1;overflow-y:auto;padding:4px 10px;min-height:40px;}
+.kcards.drop-hover{outline:2px dashed var(--accent);outline-offset:-4px;border-radius:8px;}
+.kcard{background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:10px 12px;margin-bottom:8px;
+  cursor:pointer;box-shadow:0 1px 2px rgba(16,24,40,.05);}
+.kcard:hover{border-color:var(--accent);}
+.kcard-title{font-weight:700;font-size:13.5px;}
+.kcard-snip{color:var(--muted);font-size:12px;margin-top:4px;display:-webkit-box;-webkit-line-clamp:3;
+  -webkit-box-orient:vertical;overflow:hidden;}
+.kcard-folder{font-size:11px;color:var(--accent);margin-top:6px;}
+.kadd{margin:4px 10px 12px;padding:7px;border-radius:8px;color:var(--muted);font-size:12.5px;
+  border:1px dashed var(--line);}
+.kadd:hover{background:var(--bg);color:var(--accent);border-color:var(--accent);}
+.todo{max-width:720px;margin:0 auto;padding:24px;}
+.todo-group{margin-bottom:22px;}
+.todo-group h3{font-size:13px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);
+  border-bottom:1px solid var(--line);padding-bottom:6px;}
+.todo-group h3 span{color:var(--muted);font-weight:600;}
+.todo-item{display:flex;align-items:center;gap:10px;padding:8px 6px;border-radius:7px;cursor:pointer;}
+.todo-item:hover{background:var(--bg3);}
+.todo-check{width:16px;height:16px;accent-color:var(--accent);cursor:pointer;}
+.todo-title{font-size:14px;}
+.todo-title.done{text-decoration:line-through;color:var(--muted);}
+.board-empty{padding:60px 20px;text-align:center;color:var(--muted);font-size:14px;}
+#statusSel{border:1px solid var(--line);background:var(--bg2);border-radius:6px;font-size:12px;padding:3px 6px;color:var(--ink);cursor:pointer;}
+
 #panes{flex:1;display:flex;min-height:0;}
 #mdtext{flex:1;resize:none;border:none;outline:none;background:var(--bg);color:var(--ink);
   padding:18px 22px;font-family:"SFMono-Regular",Consolas,Menlo,monospace;font-size:13.5px;

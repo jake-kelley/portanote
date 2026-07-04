@@ -20,6 +20,7 @@ type Meta struct {
 	ID      string    `json:"id"`
 	Title   string    `json:"title"`
 	Folder  string    `json:"folder"`
+	Status  string    `json:"status"` // "" | backlog | doing | done  (kanban/to-do)
 	Tags    []string  `json:"tags"`
 	Starred bool      `json:"starred"`
 	Trashed bool      `json:"trashed"`
@@ -204,6 +205,7 @@ type UpdateReq struct {
 	Title   *string   `json:"title"`
 	Body    *string   `json:"body"`
 	Folder  *string   `json:"folder"`
+	Status  *string   `json:"status"`
 	Tags    *[]string `json:"tags"`
 	Starred *bool     `json:"starred"`
 	Trashed *bool     `json:"trashed"`
@@ -241,6 +243,9 @@ func (s *Store) Update(id string, req UpdateReq) (*Note, error) {
 				s.ensureFolderLocked(f)
 			}
 		}
+	}
+	if req.Status != nil {
+		n.Status = strings.TrimSpace(*req.Status)
 	}
 	if req.Starred != nil {
 		n.Starred = *req.Starred
@@ -387,6 +392,9 @@ func serializeNote(n *Note) string {
 	fmt.Fprintf(&b, "id: %q\n", n.ID)
 	fmt.Fprintf(&b, "title: %q\n", n.Title)
 	fmt.Fprintf(&b, "folder: %q\n", n.Folder)
+	if n.Status != "" {
+		fmt.Fprintf(&b, "status: %s\n", n.Status)
+	}
 	b.WriteString("tags: [")
 	for i, t := range n.Tags {
 		if i > 0 {
@@ -452,6 +460,8 @@ func parseFrontmatter(fm string, n *Note) {
 			n.Title = unquote(val)
 		case "folder":
 			n.Folder = unquote(val)
+		case "status":
+			n.Status = unquote(val)
 		case "tags":
 			val = strings.Trim(val, "[]")
 			for _, t := range strings.Split(val, ",") {

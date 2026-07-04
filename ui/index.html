@@ -29,6 +29,8 @@
       <div class="side-section">Views</div>
       <nav id="views">
         <a data-view="all"><span class="vicon">📄</span>Notes<span class="count" id="cAll"></span></a>
+        <a data-view="board"><span class="vicon">📋</span>Board<span class="count" id="cBoard"></span></a>
+        <a data-view="todo"><span class="vicon">✓</span>To-Do<span class="count" id="cTodo"></span></a>
         <a data-view="starred"><span class="vicon">⭐</span>Starred<span class="count" id="cStarred"></span></a>
         <a data-view="untagged"><span class="vicon">✂️</span>Untagged<span class="count" id="cUntagged"></span></a>
         <a data-view="trash"><span class="vicon">🗑️</span>Trash<span class="count" id="cTrash"></span></a>
@@ -103,6 +105,13 @@
       <div id="folderrow">
         <span class="folder-ic">📁</span>
         <select id="folderSel" title="Move to folder"></select>
+        <span class="folder-ic" title="Board status">📋</span>
+        <select id="statusSel" title="Board status (Kanban / To-Do)">
+          <option value="">No status</option>
+          <option value="backlog">Backlog</option>
+          <option value="doing">In Progress</option>
+          <option value="done">Done</option>
+        </select>
       </div>
 
       <div id="tagrow">
@@ -184,6 +193,8 @@
       </footer>
     </div>
   </section>
+
+  <section id="boardpane" hidden></section>
 
 </div>
 

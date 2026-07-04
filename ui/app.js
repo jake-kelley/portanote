@@ -72,6 +72,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   const q = params.get("q");
   if (q) { $("#search").value = q; runSearch(); }
   if (params.get("settings") === "1") openSettings();
+  const view = params.get("view");
+  if (["board", "todo", "starred", "untagged", "trash"].includes(view)) { state.view = view; renderAll(); }
 
   // deep link: /#<note-id> opens that note (and refresh keeps it open)
   const hashId = decodeURIComponent(location.hash.slice(1));
@@ -217,6 +219,82 @@ function renderAll() {
   renderSidebar();
   renderList();
   renderEditor();
+  renderMain();
+}
+
+const KCOLS = [
+  { key: "backlog", label: "Backlog" },
+  { key: "doing", label: "In Progress" },
+  { key: "done", label: "Done" },
+];
+
+// switch between the normal 3-pane layout and the full-width board/to-do
+function renderMain() {
+  const board = state.view === "board" || state.view === "todo";
+  $("#listpane").hidden = board;
+  $$(".resizer").forEach((r) => (r.hidden = board));
+  $("#editor").hidden = board;
+  $("#boardpane").hidden = !board;
+  if (!board) return;
+  state.selected.clear();
+  if (state.view === "board") renderBoard();
+  else renderTodo();
+}
+
+function tasks() {
+  return state.notes.filter((n) => !n.trashed && n.status);
+}
+
+function renderBoard() {
+  const all = tasks();
+  $("#boardpane").innerHTML = `<div class="board">` + KCOLS.map((c) => {
+    const items = all.filter((n) => n.status === c.key);
+    return `<div class="kcol">
+      <div class="kcol-head">${c.label}<span class="kcount">${items.length}</span></div>
+      <div class="kcards" data-status="${c.key}">${items.map((n) => `
+        <div class="kcard" data-id="${esc(n.id)}" draggable="true">
+          <div class="kcard-title">${esc(n.title || "Untitled")}</div>
+          ${n.snippet ? `<div class="kcard-snip">${esc(n.snippet)}</div>` : ""}
+          ${n.folder ? `<div class="kcard-folder">📁 ${esc(n.folder)}</div>` : ""}
+        </div>`).join("")}</div>
+      <button class="kadd" data-status="${c.key}">+ Add card</button>
+    </div>`;
+  }).join("") + `</div>`;
+}
+
+function renderTodo() {
+  const all = tasks();
+  if (!all.length) {
+    $("#boardpane").innerHTML = `<div class="board-empty">No tasks yet.<br>Give a note a status with the 📋 selector in the editor, or add cards on the Board.</div>`;
+    return;
+  }
+  $("#boardpane").innerHTML = `<div class="todo">` + KCOLS.map((g) => {
+    const items = all.filter((n) => n.status === g.key);
+    if (!items.length) return "";
+    return `<div class="todo-group"><h3>${g.label} <span>${items.length}</span></h3>` +
+      items.map((n) => `<label class="todo-item" data-id="${esc(n.id)}">
+        <input type="checkbox" class="todo-check" ${n.status === "done" ? "checked" : ""}>
+        <span class="todo-title ${n.status === "done" ? "done" : ""}">${esc(n.title || "Untitled")}</span>
+      </label>`).join("") + `</div>`;
+  }).join("") + `</div>`;
+}
+
+async function addCard(status) {
+  const title = (prompt("Card title:") || "").trim();
+  if (!title) return;
+  const r = await fetch("/api/notes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title }) });
+  const n = await r.json();
+  await fetch("/api/notes/" + encodeURIComponent(n.id), {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title, status, folder: state.folder || "" }),
+  });
+  await reloadNotes();
+}
+
+async function openFromBoard(id) {
+  state.view = "all"; state.tag = null; state.folder = null;
+  renderAll();
+  await selectNote(id);
 }
 
 function renderSidebar() {
@@ -225,6 +303,9 @@ function renderSidebar() {
   $("#cStarred").textContent = notes.filter((n) => n.starred && !n.trashed).length || "";
   $("#cUntagged").textContent = notes.filter((n) => !n.trashed && n.tags.length === 0).length || "";
   $("#cTrash").textContent = notes.filter((n) => n.trashed).length || "";
+  const taskN = notes.filter((n) => !n.trashed && n.status).length || "";
+  $("#cBoard").textContent = taskN;
+  $("#cTodo").textContent = taskN;
 
   $$("#views a").forEach((a) =>
     a.classList.toggle("active", !state.tag && !state.folder && a.dataset.view === state.view));
@@ -298,6 +379,7 @@ function renderEditor() {
   $("#title").value = n.title;
   $("#mdtext").value = n.body;
   renderFolderSelect();
+  $("#statusSel").value = n.status || "";
   renderTagChips();
   $("#starBtn").textContent = n.starred ? "★" : "☆";
   $("#starBtn").classList.toggle("on", n.starred);
@@ -583,6 +665,7 @@ async function saveNow(extra = {}) {
     title: $("#title").value,
     body: $("#mdtext").value,
     folder: state.current.folder || "",
+    status: state.current.status || "",
     tags: state.current.tags,
     starred: state.current.starred,
     trashed: state.current.trashed,
@@ -1060,6 +1143,44 @@ function bindEvents() {
     b.addEventListener("click", () => applyMd(b.dataset.md)));
   $$("#modeSeg button").forEach((b) =>
     b.addEventListener("click", () => setMode(b.dataset.mode)));
+  $("#statusSel").addEventListener("change", async (e) => {
+    if (!state.current) return;
+    state.current.status = e.target.value;
+    await saveNow();
+  });
+
+  // board / to-do interactions
+  $("#boardpane").addEventListener("click", (e) => {
+    const add = e.target.closest(".kadd");
+    if (add) { addCard(add.dataset.status); return; }
+    if (e.target.classList.contains("todo-check")) {
+      const item = e.target.closest(".todo-item");
+      bulkApplyTo([item.dataset.id], { status: e.target.checked ? "done" : "doing" });
+      return;
+    }
+    const card = e.target.closest(".kcard, .todo-item");
+    if (card) openFromBoard(card.dataset.id);
+  });
+  $("#boardpane").addEventListener("dragstart", (e) => {
+    const card = e.target.closest(".kcard");
+    if (card) { state.dragging = [card.dataset.id]; e.dataTransfer.effectAllowed = "move"; }
+  });
+  $("#boardpane").addEventListener("dragover", (e) => {
+    const col = e.target.closest(".kcards");
+    if (col && state.dragging) { e.preventDefault(); col.classList.add("drop-hover"); }
+  });
+  $("#boardpane").addEventListener("dragleave", (e) => {
+    const col = e.target.closest(".kcards");
+    if (col) col.classList.remove("drop-hover");
+  });
+  $("#boardpane").addEventListener("drop", (e) => {
+    const col = e.target.closest(".kcards");
+    if (!col || !state.dragging) return;
+    e.preventDefault();
+    col.classList.remove("drop-hover");
+    const ids = state.dragging; state.dragging = null;
+    bulkApplyTo(ids, { status: col.dataset.status });
+  });
 
   // tags
   $("#tagInput").addEventListener("keydown", (e) => {
