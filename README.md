@@ -70,6 +70,55 @@ If Gatekeeper still objects ("cannot be opened because it is from an unidentifie
 
 Reaching it from your phone: run with `-host subnet` and open the `http://<this-device-ip>:<port>` URL it prints, on the same Wi-Fi. There's no password on the served notes, so only do this on networks you trust — and note the OS firewall may still need to allow the port.
 
+### Run automatically on startup (background, no terminal window)
+
+Running the binary normally keeps a console window open. To have Portanote start on login and run quietly in the background, use a launcher with `-no-browser` (so it doesn't pop a browser every boot) and just open `http://127.0.0.1:8737` in your browser whenever you want it (bookmark it).
+
+**Windows** — hidden launcher in the Startup folder:
+
+1. Next to the exe, create a file `portanote.vbs` containing one line (adjust the two paths; `0` = hidden window):
+
+   ```vbs
+   CreateObject("WScript.Shell").Run """C:\Users\you\portanote\portanote-windows-amd64.exe"" -no-browser -dir ""C:\Users\you\portanote\notes""", 0, False
+   ```
+
+2. Press `Win + R`, type `shell:startup`, and press Enter — this opens your Startup folder.
+3. Drop `portanote.vbs` (or a shortcut to it) into that folder.
+
+It now starts hidden at every login. **Stop it:** Task Manager → end `portanote-windows-amd64.exe`. **Disable autostart:** remove the file from the Startup folder.
+
+**macOS** — a LaunchAgent:
+
+1. Make the binary runnable and clear Gatekeeper once by launching it manually (right-click → Open), then quit it:
+   ```sh
+   chmod +x portanote-macos-arm64
+   xattr -d com.apple.quarantine portanote-macos-arm64
+   ```
+2. Create `~/Library/LaunchAgents/com.portanote.app.plist` (adjust the paths):
+
+   ```xml
+   <?xml version="1.0" encoding="UTF-8"?>
+   <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+   <plist version="1.0">
+   <dict>
+     <key>Label</key><string>com.portanote.app</string>
+     <key>ProgramArguments</key>
+     <array>
+       <string>/Users/you/portanote/portanote-macos-arm64</string>
+       <string>-no-browser</string>
+       <string>-dir</string>
+       <string>/Users/you/portanote/notes</string>
+     </array>
+     <key>RunAtLoad</key><true/>
+     <key>KeepAlive</key><true/>
+   </dict>
+   </plist>
+   ```
+
+3. Load it: `launchctl load ~/Library/LaunchAgents/com.portanote.app.plist`
+
+It starts at login (and restarts if it ever crashes), with no terminal window. **Stop & disable:** `launchctl unload ~/Library/LaunchAgents/com.portanote.app.plist`, then delete the plist.
+
 ---
 
 ## True Eisvogel PDF export (optional)
