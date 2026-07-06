@@ -80,9 +80,8 @@ func (s *Store) Backup() (string, error) {
 			return nil
 		}
 		if d.IsDir() {
-			// never back up the backups themselves or the git-sync working clones
-			if p == bdir || d.Name() == ".git-sync" {
-				return filepath.SkipDir
+			if p == bdir {
+				return filepath.SkipDir // never back up the backups themselves
 			}
 			return nil
 		}

@@ -13,6 +13,8 @@ const state = {
   folders: [],          // all folder paths ("Work/Projects/Alpha")
   collapsed: new Set(JSON.parse(localStorage.getItem("pn-folders-collapsed") || "[]")),
   templates: [],
+  tasks: [],            // standalone to-do items
+  taskDrag: null,       // task id being dragged for reorder
   selected: new Set(),  // multi-selected note ids
   lastClicked: null,
   dragging: null,
@@ -35,16 +37,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (themeParam === "dark" || themeParam === "light") setTheme(themeParam === "dark");
   else if (localStorage.getItem("pn-theme") === "dark") setTheme(true);
 
-  const [meta, notes, folders, templates] = await Promise.all([
+  const [meta, notes, folders, templates, tasks] = await Promise.all([
     fetch("/api/meta").then((r) => r.json()),
     fetch("/api/notes").then((r) => r.json()),
     fetch("/api/folders").then((r) => r.json()),
     fetch("/api/templates").then((r) => r.json()),
+    fetch("/api/tasks").then((r) => r.json()),
   ]);
   state.meta = meta;
   state.notes = notes;
   state.folders = folders.map((f) => f.name);
   state.templates = templates || [];
+  state.tasks = tasks || [];
   renderTemplateMenu();
 
   $("#verLabel").textContent = "v" + meta.version;
@@ -73,7 +77,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (q) { $("#search").value = q; runSearch(); }
   if (params.get("settings") === "1") openSettings();
   const view = params.get("view");
-  if (["board", "todo", "starred", "untagged", "trash"].includes(view)) { state.view = view; renderAll(); }
+  if (["todo", "starred", "untagged", "trash"].includes(view)) { state.view = view; renderAll(); }
 
   // deep link: /#<note-id> opens that note (and refresh keeps it open)
   const hashId = decodeURIComponent(location.hash.slice(1));
@@ -222,79 +226,114 @@ function renderAll() {
   renderMain();
 }
 
-const KCOLS = [
-  { key: "backlog", label: "Backlog" },
-  { key: "doing", label: "In Progress" },
-  { key: "done", label: "Done" },
-];
-
-// switch between the normal 3-pane layout and the full-width board/to-do
+// switch between the normal 3-pane layout and the full-width To-Do list
 function renderMain() {
-  const board = state.view === "board" || state.view === "todo";
-  $("#listpane").hidden = board;
-  $$(".resizer").forEach((r) => (r.hidden = board));
-  $("#editor").hidden = board;
-  $("#boardpane").hidden = !board;
-  if (!board) return;
-  state.selected.clear();
-  if (state.view === "board") renderBoard();
-  else renderTodo();
+  const todo = state.view === "todo";
+  $("#listpane").hidden = todo;
+  $$(".resizer").forEach((r) => (r.hidden = todo));
+  $("#editor").hidden = todo;
+  $("#boardpane").hidden = !todo;
+  if (todo) { state.selected.clear(); renderTasks(); }
 }
 
-function tasks() {
-  return state.notes.filter((n) => !n.trashed && n.status);
+function noteTitleFor(noteId) {
+  const n = state.notes.find((x) => x.id === noteId && !x.trashed);
+  return n ? (n.title || "Untitled") : null;
 }
 
-function renderBoard() {
-  const all = tasks();
-  $("#boardpane").innerHTML = `<div class="board">` + KCOLS.map((c) => {
-    const items = all.filter((n) => n.status === c.key);
-    return `<div class="kcol">
-      <div class="kcol-head">${c.label}<span class="kcount">${items.length}</span></div>
-      <div class="kcards" data-status="${c.key}">${items.map((n) => `
-        <div class="kcard" data-id="${esc(n.id)}" draggable="true">
-          <div class="kcard-title">${esc(n.title || "Untitled")}</div>
-          ${n.snippet ? `<div class="kcard-snip">${esc(n.snippet)}</div>` : ""}
-          ${n.folder ? `<div class="kcard-folder">📁 ${esc(n.folder)}</div>` : ""}
-        </div>`).join("")}</div>
-      <button class="kadd" data-status="${c.key}">+ Add card</button>
+function renderTasks() {
+  const doneCount = state.tasks.filter((t) => t.done).length;
+  const rows = state.tasks.map((t) => {
+    const linkTitle = t.noteId ? noteTitleFor(t.noteId) : null;
+    const link = t.noteId
+      ? `<a class="task-note${linkTitle ? "" : " missing"}" data-note="${esc(t.noteId)}"
+           title="${linkTitle ? "Open note: " + esc(linkTitle) : "Linked note no longer exists"}">🔗${linkTitle ? " " + esc(linkTitle) : ""}</a>`
+      : "";
+    return `<div class="task-item${t.done ? " done" : ""}" data-id="${esc(t.id)}" draggable="true">
+      <span class="task-grip" title="Drag to reorder">⠿</span>
+      <input type="checkbox" class="task-check" ${t.done ? "checked" : ""}>
+      <span class="task-text" title="Double-click to edit">${esc(t.text)}</span>
+      ${link}
+      <button class="task-del" title="Delete task">✕</button>
     </div>`;
-  }).join("") + `</div>`;
+  }).join("");
+  $("#boardpane").innerHTML = `<div class="todo">
+    <div class="todo-topbar">
+      <h2 class="todo-h">To-Do</h2>
+      ${doneCount ? `<button id="clearDoneBtn" class="btn-secondary" title="Delete all completed tasks">Clear completed (${doneCount})</button>` : ""}
+    </div>
+    <div class="task-add"><input id="taskAddInput" placeholder="Add a task…  (press Enter)" autocomplete="off"></div>
+    <div id="taskList">${rows || `<div class="task-empty">No tasks yet. Add one above, or use the ☑ button in a note's toolbar to create one linked to that note.</div>`}</div>
+  </div>`;
 }
 
-function renderTodo() {
-  const all = tasks();
-  if (!all.length) {
-    $("#boardpane").innerHTML = `<div class="board-empty">No tasks yet.<br>Give a note a status with the 📋 selector in the editor, or add cards on the Board.</div>`;
-    return;
-  }
-  $("#boardpane").innerHTML = `<div class="todo">` + KCOLS.map((g) => {
-    const items = all.filter((n) => n.status === g.key);
-    if (!items.length) return "";
-    return `<div class="todo-group"><h3>${g.label} <span>${items.length}</span></h3>` +
-      items.map((n) => `<label class="todo-item" data-id="${esc(n.id)}">
-        <input type="checkbox" class="todo-check" ${n.status === "done" ? "checked" : ""}>
-        <span class="todo-title ${n.status === "done" ? "done" : ""}">${esc(n.title || "Untitled")}</span>
-      </label>`).join("") + `</div>`;
-  }).join("") + `</div>`;
+async function createTask(text, noteId) {
+  text = (text || "").trim();
+  if (!text) return;
+  const t = await fetch("/api/tasks", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, noteId: noteId || "" }),
+  }).then((r) => r.json());
+  state.tasks.push(t);
+  renderSidebar();
+  if (state.view === "todo") renderTasks();
 }
 
-async function addCard(status) {
-  const title = (prompt("Card title:") || "").trim();
-  if (!title) return;
-  const r = await fetch("/api/notes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title }) });
-  const n = await r.json();
-  await fetch("/api/notes/" + encodeURIComponent(n.id), {
-    method: "PUT", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title, status, folder: state.folder || "" }),
+async function toggleTask(id, done) {
+  await fetch("/api/tasks/" + encodeURIComponent(id), {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ done }),
   });
-  await reloadNotes();
+  const t = state.tasks.find((x) => x.id === id);
+  if (t) t.done = done;
+  renderSidebar();
+  renderTasks();
 }
 
-async function openFromBoard(id) {
+async function deleteTask(id) {
+  await fetch("/api/tasks/" + encodeURIComponent(id), { method: "DELETE" });
+  state.tasks = state.tasks.filter((x) => x.id !== id);
+  renderSidebar();
+  renderTasks();
+}
+
+async function editTask(id, text) {
+  text = (text || "").trim();
+  if (!text) return;
+  await fetch("/api/tasks/" + encodeURIComponent(id), {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }),
+  });
+  const t = state.tasks.find((x) => x.id === id);
+  if (t) t.text = text;
+  renderTasks();
+}
+
+async function clearDoneTasks() {
+  state.tasks = await fetch("/api/tasks/clear-done", { method: "POST" }).then((r) => r.json());
+  renderSidebar();
+  renderTasks();
+}
+
+async function reorderTasks(ids) {
+  state.tasks = await fetch("/api/tasks/reorder", {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }),
+  }).then((r) => r.json());
+  renderTasks();
+}
+
+// toolbar: create a to-do task linked back to the current note
+async function createTaskFromNote() {
+  if (!state.current) return;
+  await createTask(state.current.title || "Untitled", state.current.id);
+  setSaveState("saved", "☑ Task created");
+}
+
+// open the note a task links to
+async function openTaskNote(noteId) {
+  const n = state.notes.find((x) => x.id === noteId && !x.trashed);
+  if (!n) { alert("That note no longer exists."); return; }
   state.view = "all"; state.tag = null; state.folder = null;
   renderAll();
-  await selectNote(id);
+  await selectNote(noteId);
 }
 
 function renderSidebar() {
@@ -303,9 +342,7 @@ function renderSidebar() {
   $("#cStarred").textContent = notes.filter((n) => n.starred && !n.trashed).length || "";
   $("#cUntagged").textContent = notes.filter((n) => !n.trashed && n.tags.length === 0).length || "";
   $("#cTrash").textContent = notes.filter((n) => n.trashed).length || "";
-  const taskN = notes.filter((n) => !n.trashed && n.status).length || "";
-  $("#cBoard").textContent = taskN;
-  $("#cTodo").textContent = taskN;
+  $("#cTodo").textContent = state.tasks.filter((t) => !t.done).length || "";
 
   $$("#views a").forEach((a) =>
     a.classList.toggle("active", !state.tag && !state.folder && a.dataset.view === state.view));
@@ -379,7 +416,6 @@ function renderEditor() {
   $("#title").value = n.title;
   $("#mdtext").value = n.body;
   renderFolderSelect();
-  $("#statusSel").value = n.status || "";
   renderTagChips();
   $("#starBtn").textContent = n.starred ? "★" : "☆";
   $("#starBtn").classList.toggle("on", n.starred);
@@ -665,7 +701,6 @@ async function saveNow(extra = {}) {
     title: $("#title").value,
     body: $("#mdtext").value,
     folder: state.current.folder || "",
-    status: state.current.status || "",
     tags: state.current.tags,
     starred: state.current.starred,
     trashed: state.current.trashed,
@@ -735,50 +770,10 @@ async function openSettings() {
   $("#setInterval").value = st.backupIntervalHours;
   $("#setKeep").value = st.backupKeep;
   renderBackupStatus(st);
-  refreshSync();
   $("#settingsOverlay").hidden = false;
 }
 
-// ---- Git sync UI ----
-async function refreshSync() {
-  const st = await fetch("/api/sync").then((r) => r.json());
-  $("#gitUnavailable").hidden = st.gitAvailable;
-  $("#gitAuthBox").style.display = st.gitAvailable ? "" : "none";
-  $("#gitUser").value = st.username || "";
-  $("#gitToken").placeholder = st.hasToken ? "•••••• saved (blank = keep)" : "glpat-…";
-  const folders = st.folders || [];
-  const synced = new Set(folders.map((f) => f.path));
-  $("#syncFolders").innerHTML = folders.map((f, i) => `
-    <div class="sync-folder" data-path="${esc(f.path)}">
-      <div class="sf-head">📁 <b>${esc(f.path)}</b> <button class="sf-unlink">unlink</button></div>
-      <div class="sf-remote">${esc(f.remoteUrl)}</div>
-      <div class="sf-row">
-        <span>Branch</span>
-        <input class="sf-branch" value="${esc(f.branch)}" list="brdl-${i}" style="width:140px">
-        <datalist id="brdl-${i}"></datalist>
-        <button class="sf-branches btn-secondary">List branches</button>
-        <button class="sf-pull btn-secondary">⬇ Pull</button>
-      </div>
-      <div class="sf-row">
-        <input class="sf-msg" placeholder="commit message (optional)">
-        <button class="sf-push btn-primary">⬆ Commit &amp; Push</button>
-      </div>
-      <pre class="sf-log" hidden></pre>
-    </div>`).join("");
-  const avail = state.folders.filter((p) => !synced.has(p));
-  $("#syncAddFolder").innerHTML = avail.length
-    ? avail.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`).join("")
-    : `<option value="">(make a folder first)</option>`;
-}
-
-async function setSyncBranch(path, branch) {
-  await fetch("/api/sync/branch", {
-    method: "PUT", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path, branch }),
-  });
-}
-
-// a pull can import new/changed notes — refresh the local view
+// refresh the local view after a bulk change
 async function reloadNotes() {
   const [notes, folders] = await Promise.all([
     fetch("/api/notes").then((r) => r.json()),
@@ -1143,43 +1138,57 @@ function bindEvents() {
     b.addEventListener("click", () => applyMd(b.dataset.md)));
   $$("#modeSeg button").forEach((b) =>
     b.addEventListener("click", () => setMode(b.dataset.mode)));
-  $("#statusSel").addEventListener("change", async (e) => {
-    if (!state.current) return;
-    state.current.status = e.target.value;
-    await saveNow();
-  });
+  // create a task linked to the current note
+  $("#taskFromNoteBtn").addEventListener("click", createTaskFromNote);
 
-  // board / to-do interactions
+  // to-do list interactions
   $("#boardpane").addEventListener("click", (e) => {
-    const add = e.target.closest(".kadd");
-    if (add) { addCard(add.dataset.status); return; }
-    if (e.target.classList.contains("todo-check")) {
-      const item = e.target.closest(".todo-item");
-      bulkApplyTo([item.dataset.id], { status: e.target.checked ? "done" : "doing" });
-      return;
+    if (e.target.id === "clearDoneBtn") { clearDoneTasks(); return; }
+    const del = e.target.closest(".task-del");
+    if (del) { deleteTask(del.closest(".task-item").dataset.id); return; }
+    const link = e.target.closest(".task-note");
+    if (link) { openTaskNote(link.dataset.note); return; }
+    if (e.target.classList.contains("task-check")) {
+      toggleTask(e.target.closest(".task-item").dataset.id, e.target.checked);
     }
-    const card = e.target.closest(".kcard, .todo-item");
-    if (card) openFromBoard(card.dataset.id);
   });
+  $("#boardpane").addEventListener("dblclick", (e) => {
+    const txt = e.target.closest(".task-text");
+    if (!txt) return;
+    const id = txt.closest(".task-item").dataset.id;
+    const t = state.tasks.find((x) => x.id === id);
+    const nv = prompt("Edit task:", t ? t.text : "");
+    if (nv !== null) editTask(id, nv);
+  });
+  $("#boardpane").addEventListener("keydown", (e) => {
+    if (e.target.id === "taskAddInput" && e.key === "Enter" && e.target.value.trim()) {
+      const v = e.target.value; e.target.value = "";
+      createTask(v).then(() => { const inp = $("#taskAddInput"); if (inp) inp.focus(); });
+    }
+  });
+  // drag-to-reorder tasks
   $("#boardpane").addEventListener("dragstart", (e) => {
-    const card = e.target.closest(".kcard");
-    if (card) { state.dragging = [card.dataset.id]; e.dataTransfer.effectAllowed = "move"; }
+    const item = e.target.closest(".task-item");
+    if (item) { state.taskDrag = item.dataset.id; e.dataTransfer.effectAllowed = "move"; }
   });
   $("#boardpane").addEventListener("dragover", (e) => {
-    const col = e.target.closest(".kcards");
-    if (col && state.dragging) { e.preventDefault(); col.classList.add("drop-hover"); }
+    const item = e.target.closest(".task-item");
+    if (item && state.taskDrag) { e.preventDefault(); item.classList.add("task-over"); }
   });
   $("#boardpane").addEventListener("dragleave", (e) => {
-    const col = e.target.closest(".kcards");
-    if (col) col.classList.remove("drop-hover");
+    const item = e.target.closest(".task-item");
+    if (item) item.classList.remove("task-over");
   });
   $("#boardpane").addEventListener("drop", (e) => {
-    const col = e.target.closest(".kcards");
-    if (!col || !state.dragging) return;
+    const item = e.target.closest(".task-item");
+    if (!item || !state.taskDrag) return;
     e.preventDefault();
-    col.classList.remove("drop-hover");
-    const ids = state.dragging; state.dragging = null;
-    bulkApplyTo(ids, { status: col.dataset.status });
+    item.classList.remove("task-over");
+    const dragId = state.taskDrag; state.taskDrag = null;
+    if (dragId === item.dataset.id) return;
+    const ids = state.tasks.map((t) => t.id).filter((x) => x !== dragId);
+    ids.splice(ids.indexOf(item.dataset.id), 0, dragId);
+    reorderTasks(ids);
   });
 
   // tags
@@ -1235,59 +1244,6 @@ function bindEvents() {
   });
   $("#settingsSave").addEventListener("click", saveSettings);
   $("#backupNowBtn").addEventListener("click", backupNow);
-
-  // git sync
-  $("#gitAuthSave").addEventListener("click", async () => {
-    await fetch("/api/sync/auth", {
-      method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: $("#gitUser").value, token: $("#gitToken").value }),
-    });
-    $("#gitToken").value = "";
-    refreshSync();
-  });
-  $("#syncAddBtn").addEventListener("click", async () => {
-    const path = $("#syncAddFolder").value, url = $("#syncAddURL").value.trim();
-    const branch = $("#syncAddBranch").value.trim() || "main";
-    if (!path || !url) { alert("Pick a folder and enter a repo URL."); return; }
-    await fetch("/api/sync/folder", {
-      method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path, remoteUrl: url, branch }),
-    });
-    $("#syncAddURL").value = ""; $("#syncAddBranch").value = "";
-    refreshSync();
-  });
-  $("#syncFolders").addEventListener("click", async (e) => {
-    const card = e.target.closest(".sync-folder");
-    if (!card) return;
-    const path = card.dataset.path;
-    const branch = card.querySelector(".sf-branch").value;
-    const log = card.querySelector(".sf-log");
-    const btn = e.target.closest("button");
-    const show = (r) => { log.hidden = false; log.textContent = (r.error ? "⚠ " + r.error + "\n\n" : "") + (r.log || ""); };
-    if (e.target.classList.contains("sf-unlink")) {
-      if (!confirm(`Unlink “${path}” from Git? Removes the local clone; your notes stay.`)) return;
-      await fetch("/api/sync/folder", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path }) });
-      refreshSync();
-    } else if (e.target.classList.contains("sf-branches")) {
-      btn.disabled = true; btn.textContent = "…";
-      const r = await fetch("/api/sync/branches?path=" + encodeURIComponent(path)).then((x) => x.json());
-      if (r.branches) card.querySelector("datalist").innerHTML = r.branches.map((b) => `<option value="${esc(b)}">`).join("");
-      else show(r);
-      btn.disabled = false; btn.textContent = "List branches";
-    } else if (e.target.classList.contains("sf-pull")) {
-      await setSyncBranch(path, branch);
-      btn.disabled = true; btn.textContent = "Pulling…";
-      show(await fetch("/api/sync/pull", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path }) }).then((x) => x.json()));
-      btn.disabled = false; btn.textContent = "⬇ Pull";
-      await reloadNotes();
-    } else if (e.target.classList.contains("sf-push")) {
-      await setSyncBranch(path, branch);
-      const message = card.querySelector(".sf-msg").value;
-      btn.disabled = true; btn.textContent = "Pushing…";
-      show(await fetch("/api/sync/push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path, message }) }).then((x) => x.json()));
-      btn.disabled = false; btn.textContent = "⬆ Commit & Push";
-    }
-  });
 
   // global shortcuts
   document.addEventListener("keydown", (e) => {

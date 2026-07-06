@@ -29,8 +29,7 @@
       <div class="side-section">Views</div>
       <nav id="views">
         <a data-view="all"><span class="vicon">📄</span>Notes<span class="count" id="cAll"></span></a>
-        <a data-view="board"><span class="vicon">📋</span>Board<span class="count" id="cBoard"></span></a>
-        <a data-view="todo"><span class="vicon">✓</span>To-Do<span class="count" id="cTodo"></span></a>
+        <a data-view="todo"><span class="vicon">☑️</span>To-Do<span class="count" id="cTodo"></span></a>
         <a data-view="starred"><span class="vicon">⭐</span>Starred<span class="count" id="cStarred"></span></a>
         <a data-view="untagged"><span class="vicon">✂️</span>Untagged<span class="count" id="cUntagged"></span></a>
         <a data-view="trash"><span class="vicon">🗑️</span>Trash<span class="count" id="cTrash"></span></a>
@@ -105,13 +104,6 @@
       <div id="folderrow">
         <span class="folder-ic">📁</span>
         <select id="folderSel" title="Move to folder"></select>
-        <span class="folder-ic" title="Board status">📋</span>
-        <select id="statusSel" title="Board status (Kanban / To-Do)">
-          <option value="">No status</option>
-          <option value="backlog">Backlog</option>
-          <option value="doing">In Progress</option>
-          <option value="done">Done</option>
-        </select>
       </div>
 
       <div id="tagrow">
@@ -160,6 +152,7 @@
         </div>
         <div class="tb-group right">
           <button id="starBtn" title="Star">☆</button>
+          <button id="taskFromNoteBtn" title="Create a to-do task from this note">☑</button>
           <details id="exportMenu">
             <summary title="Export">⤓</summary>
             <div class="menu">
@@ -300,25 +293,6 @@
       <div class="settings-actions">
         <button id="backupNowBtn" class="btn-secondary">Back up now</button>
         <button id="settingsSave" class="btn-primary">Save</button>
-      </div>
-
-      <h3 style="margin-top:22px">Git sync (GitLab)</h3>
-      <p class="settings-desc">Manually pull / push a folder to a Git repo. Your token is stored locally (<code>0600</code>) and sent as HTTPS auth. No automatic pushing — you control it with the buttons.</p>
-      <div id="gitUnavailable" class="settings-desc" hidden>⚠ <code>git</code> was not found on your PATH — sync is disabled. Install git to enable it.</div>
-      <div id="gitAuthBox">
-        <label class="setting-row">User&nbsp; <input id="gitUser" placeholder="oauth2" style="width:130px"></label>
-        <label class="setting-row">Token <input id="gitToken" type="password" placeholder="glpat-…  (blank = keep current)" style="width:210px"></label>
-        <div class="settings-actions"><button id="gitAuthSave" class="btn-secondary">Save token</button></div>
-        <div id="syncFolders"></div>
-        <div class="sync-add">
-          <div class="cmlabel">Link a folder to a repo</div>
-          <select id="syncAddFolder"></select>
-          <input id="syncAddURL" placeholder="https://gitlab.example.com/team/notes.git  (or …/notes.wiki.git)">
-          <div class="sync-add-row">
-            <input id="syncAddBranch" placeholder="main" style="width:110px">
-            <button id="syncAddBtn" class="btn-secondary">Link folder</button>
-          </div>
-        </div>
       </div>
     </div>
   </div>

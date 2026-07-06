@@ -125,64 +125,48 @@ func newAPI(store *Store, uiFS fs.FS) http.Handler {
 		writeJSON(w, http.StatusCreated, map[string]string{"name": name})
 	})
 
-	// ---- Git sync (manual pull / commit+push; per-folder; branch-selectable) ----
-	mux.HandleFunc("GET /api/sync", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, store.SyncStatus())
+	// ---- standalone to-do tasks ----
+	mux.HandleFunc("GET /api/tasks", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, store.Tasks())
 	})
-	mux.HandleFunc("PUT /api/sync/auth", func(w http.ResponseWriter, r *http.Request) {
-		var in struct{ Username, Token string }
+	mux.HandleFunc("POST /api/tasks", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Text, NoteID string }
 		json.NewDecoder(r.Body).Decode(&in)
-		store.SetGitAuth(in.Username, in.Token)
-		writeJSON(w, http.StatusOK, store.SyncStatus())
-	})
-	mux.HandleFunc("PUT /api/sync/folder", func(w http.ResponseWriter, r *http.Request) {
-		var in struct{ Path, RemoteURL, Branch string }
-		json.NewDecoder(r.Body).Decode(&in)
-		if err := store.ConfigureFolderSync(in.Path, in.RemoteURL, in.Branch); err != nil {
+		t, err := store.CreateTask(in.Text, in.NoteID)
+		if err != nil {
 			writeErr(w, http.StatusBadRequest, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, store.SyncStatus())
+		writeJSON(w, http.StatusCreated, t)
 	})
-	mux.HandleFunc("DELETE /api/sync/folder", func(w http.ResponseWriter, r *http.Request) {
-		var in struct{ Path string }
+	mux.HandleFunc("PUT /api/tasks/{id}", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Done *bool   `json:"done"`
+			Text *string `json:"text"`
+		}
 		json.NewDecoder(r.Body).Decode(&in)
-		store.UnlinkFolderSync(in.Path)
-		writeJSON(w, http.StatusOK, store.SyncStatus())
-	})
-	mux.HandleFunc("PUT /api/sync/branch", func(w http.ResponseWriter, r *http.Request) {
-		var in struct{ Path, Branch string }
-		json.NewDecoder(r.Body).Decode(&in)
-		store.SetSyncBranch(in.Path, in.Branch)
-		writeJSON(w, http.StatusOK, store.SyncStatus())
-	})
-	mux.HandleFunc("GET /api/sync/branches", func(w http.ResponseWriter, r *http.Request) {
-		branches, err := store.SyncBranches(r.URL.Query().Get("path"))
+		t, err := store.UpdateTask(r.PathValue("id"), in.Done, in.Text)
 		if err != nil {
-			writeErr(w, http.StatusBadGateway, err)
+			writeErr(w, http.StatusNotFound, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string][]string{"branches": branches})
+		writeJSON(w, http.StatusOK, t)
 	})
-	mux.HandleFunc("POST /api/sync/pull", func(w http.ResponseWriter, r *http.Request) {
-		var in struct{ Path string }
-		json.NewDecoder(r.Body).Decode(&in)
-		log, err := store.SyncPull(in.Path)
-		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error(), "log": log})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]string{"log": log})
+	mux.HandleFunc("DELETE /api/tasks/{id}", func(w http.ResponseWriter, r *http.Request) {
+		store.DeleteTask(r.PathValue("id"))
+		w.WriteHeader(http.StatusNoContent)
 	})
-	mux.HandleFunc("POST /api/sync/push", func(w http.ResponseWriter, r *http.Request) {
-		var in struct{ Path, Message string }
-		json.NewDecoder(r.Body).Decode(&in)
-		log, err := store.SyncPush(in.Path, in.Message)
-		if err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error(), "log": log})
-			return
+	mux.HandleFunc("POST /api/tasks/clear-done", func(w http.ResponseWriter, r *http.Request) {
+		store.ClearDoneTasks()
+		writeJSON(w, http.StatusOK, store.Tasks())
+	})
+	mux.HandleFunc("PUT /api/tasks/reorder", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			IDs []string `json:"ids"`
 		}
-		writeJSON(w, http.StatusOK, map[string]string{"log": log})
+		json.NewDecoder(r.Body).Decode(&in)
+		store.ReorderTasks(in.IDs)
+		writeJSON(w, http.StatusOK, store.Tasks())
 	})
 
 	mux.HandleFunc("GET /api/folders", func(w http.ResponseWriter, r *http.Request) {
