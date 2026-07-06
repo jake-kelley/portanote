@@ -101,6 +101,25 @@ func newAPI(store *Store, uiFS fs.FS) http.Handler {
 	mux.HandleFunc("GET /api/templates", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, store.Templates())
 	})
+	mux.HandleFunc("POST /api/templates", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Name, Body string }
+		json.NewDecoder(r.Body).Decode(&in)
+		name, err := store.CreateTemplate(in.Name, in.Body)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]string{"name": name})
+	})
+	mux.HandleFunc("POST /api/templates/delete", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Name string }
+		json.NewDecoder(r.Body).Decode(&in)
+		if err := store.DeleteTemplate(in.Name); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
 
 	mux.HandleFunc("GET /api/settings", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, store.BackupStatus())

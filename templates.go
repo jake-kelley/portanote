@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,11 +16,30 @@ type Template struct {
 
 func (s *Store) templatesDir() string { return filepath.Join(s.dir, "templates") }
 
+// splitTemplate returns the explicit frontmatter title (if any) and the body.
+// Unlike a note, a template's suggested title is never derived from a heading —
+// so a template saved from a note (no frontmatter) yields an untitled new note.
+func splitTemplate(raw string) (title, body string) {
+	body = raw
+	if strings.HasPrefix(raw, "---\n") || strings.HasPrefix(raw, "---\r\n") {
+		rest := raw[strings.Index(raw, "\n")+1:]
+		if end := findFrontmatterEnd(rest); end >= 0 {
+			for _, line := range strings.Split(rest[:end], "\n") {
+				if k, v, ok := strings.Cut(strings.TrimRight(line, "\r"), ":"); ok && strings.TrimSpace(k) == "title" {
+					title = unquote(strings.TrimSpace(v))
+				}
+			}
+			body = strings.TrimLeft(strings.TrimPrefix(rest[end:], "---"), "\r\n")
+		}
+	}
+	return title, body
+}
+
 // Templates lists the .md files in <notes>/templates as reusable note skeletons.
 func (s *Store) Templates() []Template {
 	entries, err := os.ReadDir(s.templatesDir())
 	if err != nil {
-		return nil
+		return []Template{}
 	}
 	out := []Template{}
 	for _, e := range entries {
@@ -31,15 +51,55 @@ func (s *Store) Templates() []Template {
 			continue
 		}
 		base := strings.TrimSuffix(e.Name(), filepath.Ext(e.Name()))
-		n := parseNote(base, string(raw))
-		title := n.Title
-		if title == base { // no explicit title in the template — leave it blank
-			title = ""
-		}
-		out = append(out, Template{Name: base, Title: title, Body: n.Body})
+		title, body := splitTemplate(string(raw))
+		out = append(out, Template{Name: base, Title: title, Body: body})
 	}
 	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
 	return out
+}
+
+// cleanTemplateName keeps a readable, filesystem-safe template name.
+func cleanTemplateName(name string) string {
+	name = strings.Map(func(r rune) rune {
+		if r < 0x20 || strings.ContainsRune(`/\:*?"<>|`, r) {
+			return -1
+		}
+		return r
+	}, name)
+	name = strings.Trim(strings.TrimSpace(name), ".")
+	if len(name) > 80 {
+		name = strings.TrimSpace(name[:80])
+	}
+	return name
+}
+
+// CreateTemplate saves a note body as a reusable template (overwrites by name).
+// The body is stored as-is with no frontmatter, so notes created from it start
+// untitled — the template is about the structure, not a fixed title.
+func (s *Store) CreateTemplate(name, body string) (string, error) {
+	name = cleanTemplateName(name)
+	if name == "" {
+		return "", errors.New("template name required")
+	}
+	if err := os.MkdirAll(s.templatesDir(), 0o755); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(filepath.Join(s.templatesDir(), name+".md"), []byte(body), 0o644); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+func (s *Store) DeleteTemplate(name string) error {
+	name = cleanTemplateName(name)
+	if name == "" {
+		return errors.New("template name required")
+	}
+	err := os.Remove(filepath.Join(s.templatesDir(), name+".md"))
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 // seedTemplates drops a few starter templates on first run (the dir is absent).

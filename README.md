@@ -130,7 +130,7 @@ Open the **To-Do** view for a standalone task list — independent of your notes
 
 ### Templates
 
-Files in the `templates/` folder become reusable note skeletons, offered by the `▾` next to the new-note button. Three starters (Meeting Notes, Runbook, Daily Log) are created on first run — edit or delete them freely, or add your own `.md` files.
+Files in the `templates/` folder become reusable note skeletons, offered by the `▾` next to the new-note button. Three starters (Meeting Notes, Runbook, Daily Log) are created on first run. To make your own, open a note with the structure you want and choose **＋ Save current note as template…** from that `▾` menu — its body becomes a new template. Hover a template in the menu for the `✕` to delete it (or just edit/remove the `.md` files in `templates/` directly).
 
 ### Backups & settings (⚙)
 

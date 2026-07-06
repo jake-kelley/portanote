@@ -396,14 +396,18 @@ function renderList() {
     const snip = hl ? highlight(n.snippet, hl) : esc(n.snippet);
     const cls = (state.current?.id === n.id ? " active" : "") + (state.selected.has(n.id) ? " selected" : "");
     return `<div class="note-item${cls}" data-id="${esc(n.id)}" draggable="true">
-      <div class="ni-top"><span class="ni-title">${title}</span>${n.starred ? '<span class="ni-star">★</span>' : ""}</div>
-      ${snip ? `<div class="ni-snippet">${snip}</div>` : ""}
-      <div class="ni-date">${fmtDate(n.updated, true)}</div>
-      ${(n.folder && !state.folder) || n.tags.length ? `<div class="ni-tags">${
-        n.folder && !state.folder ? `<span class="chip chip-folder">📁 ${esc(n.folder)}</span>` : ""
-      }${n.tags.map((t) => `<span class="chip">${esc(t)}</span>`).join("")}</div>` : ""}
+      <input type="checkbox" class="note-check" ${state.selected.has(n.id) ? "checked" : ""} tabindex="-1" title="Select">
+      <div class="ni-body">
+        <div class="ni-top"><span class="ni-title">${title}</span>${n.starred ? '<span class="ni-star">★</span>' : ""}</div>
+        ${snip ? `<div class="ni-snippet">${snip}</div>` : ""}
+        <div class="ni-date">${fmtDate(n.updated, true)}</div>
+        ${(n.folder && !state.folder) || n.tags.length ? `<div class="ni-tags">${
+          n.folder && !state.folder ? `<span class="chip chip-folder">📁 ${esc(n.folder)}</span>` : ""
+        }${n.tags.map((t) => `<span class="chip">${esc(t)}</span>`).join("")}</div>` : ""}
+      </div>
     </div>`;
   }).join("");
+  $("#notelist").classList.toggle("has-selection", state.selected.size > 0);
 }
 
 function renderEditor() {
@@ -586,11 +590,49 @@ async function refreshSuggestions() {
 }
 
 function renderTemplateMenu() {
-  const menu = $("#tplMenu");
-  if (!state.templates.length) { menu.hidden = true; return; }
-  menu.hidden = false;
-  $("#tplList").innerHTML = `<div class="tpl-head">New from template</div>` +
-    state.templates.map((t, i) => `<button data-tpl="${i}">${esc(t.name)}</button>`).join("");
+  $("#tplMenu").hidden = false; // always available, so you can save new templates
+  let html = "";
+  if (state.templates.length) {
+    html += `<div class="tpl-head">New from template</div>`;
+    html += state.templates.map((t, i) =>
+      `<div class="tpl-row">
+         <button class="tpl-pick" data-tpl="${i}">${esc(t.name)}</button>
+         <button class="tpl-del" data-tpldel="${esc(t.name)}" title="Delete template">✕</button>
+       </div>`).join("");
+    html += `<div class="mdiv"></div>`;
+  }
+  html += `<button class="tpl-save">＋ Save current note as template…</button>`;
+  $("#tplList").innerHTML = html;
+}
+
+async function refreshTemplates() {
+  state.templates = (await fetch("/api/templates").then((r) => r.json())) || [];
+  renderTemplateMenu();
+}
+
+// save the open note's body as a reusable template
+async function saveNoteAsTemplate() {
+  $("#tplMenu").open = false;
+  if (!state.current) { alert("Open a note first to save it as a template."); return; }
+  const name = (prompt("Template name:", $("#title").value || "New Template") || "").trim();
+  if (!name) return;
+  if (state.templates.some((t) => t.name.toLowerCase() === name.toLowerCase()) &&
+      !confirm(`A template named “${name}” already exists. Overwrite it?`)) return;
+  const r = await fetch("/api/templates", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, body: $("#mdtext").value }),
+  });
+  if (!r.ok) { alert("Could not save template."); return; }
+  await refreshTemplates();
+  setSaveState("saved", "Template saved ✓");
+}
+
+async function deleteTemplate(name) {
+  if (!confirm(`Delete the template “${name}”?`)) return;
+  await fetch("/api/templates/delete", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }),
+  });
+  await refreshTemplates();
 }
 
 /* ---- multi-select + drag-and-drop ---- */
@@ -599,7 +641,18 @@ function renderBulkBar() {
   const bar = $("#bulkbar");
   if (!state.selected.size) { bar.hidden = true; return; }
   bar.hidden = false;
-  $("#bulkCount").textContent = state.selected.size + " selected";
+  const count = `<span id="bulkCount">${state.selected.size} selected</span>`;
+  if (state.view === "trash") {
+    bar.innerHTML = count +
+      `<button data-bulk="restore" title="Restore selected">↩ Restore</button>` +
+      `<button data-bulk="purge" class="bulk-danger" title="Permanently delete selected">🗑 Delete forever</button>` +
+      `<button data-bulk="clear" title="Clear selection">✕</button>`;
+    return;
+  }
+  bar.innerHTML = count + `<select id="bulkFolder"></select>` +
+    `<button data-bulk="star" title="Star selected">⭐</button>` +
+    `<button data-bulk="trash" title="Move selected to Trash">🗑</button>` +
+    `<button data-bulk="clear" title="Clear selection">✕</button>`;
   $("#bulkFolder").innerHTML = `<option value="">Move to…</option><option value="__none__">(no folder)</option>` +
     folderOrder().map((f) => `<option value="${esc(f.path)}">${"  ".repeat(f.depth)}${esc(f.name)}</option>`).join("");
 }
@@ -631,6 +684,17 @@ async function bulkApplyTo(ids, patch) {
 }
 const bulkApply = (patch) => bulkApplyTo([...state.selected], patch);
 const moveNotes = (ids, folder) => bulkApplyTo(ids, { folder });
+
+// permanently delete every selected (already-trashed) note
+async function bulkDeleteForever() {
+  const ids = [...state.selected];
+  if (!ids.length) return;
+  if (!confirm(`Permanently delete ${ids.length} note${ids.length === 1 ? "" : "s"}? This cannot be undone.`)) return;
+  await Promise.all(ids.map((id) => fetch("/api/notes/" + encodeURIComponent(id), { method: "DELETE" })));
+  if (state.current && ids.includes(state.current.id)) state.current = null;
+  state.selected.clear();
+  await reloadNotes();
+}
 
 // generic drop target: highlights on dragover, calls onDrop(target, ids) on drop
 function bindDropTarget(container, selector, onDrop) {
@@ -1065,6 +1129,13 @@ function bindEvents() {
     const item = e.target.closest(".note-item");
     if (!item) return;
     const id = item.dataset.id;
+    if (e.target.classList.contains("note-check")) {
+      e.stopPropagation();
+      if (e.target.checked) state.selected.add(id); else state.selected.delete(id);
+      state.lastClicked = id;
+      renderList();
+      return;
+    }
     if (e.ctrlKey || e.metaKey) { toggleSelect(id); return; }
     if (e.shiftKey) { rangeSelect(id); return; }
     if (state.selected.size) { state.selected.clear(); renderList(); }
@@ -1090,16 +1161,29 @@ function bindEvents() {
     const a = e.target.closest("[data-id]");
     if (a) selectNote(a.dataset.id);
   });
-  // bulk-action bar
-  $("#bulkFolder").addEventListener("change", (e) => {
-    if (e.target.value) bulkApply({ folder: e.target.value === "__none__" ? "" : e.target.value });
+  // bulk-action bar (buttons are re-rendered per view, so delegate)
+  $("#bulkbar").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-bulk]");
+    if (!b) return;
+    switch (b.dataset.bulk) {
+      case "star":    bulkApply({ starred: true }); break;
+      case "trash":   bulkApply({ trashed: true }); break;
+      case "restore": bulkApply({ trashed: false }); break;
+      case "purge":   bulkDeleteForever(); break;
+      case "clear":   state.selected.clear(); renderList(); break;
+    }
   });
-  $("#bulkStar").addEventListener("click", () => bulkApply({ starred: true }));
-  $("#bulkTrash").addEventListener("click", () => bulkApply({ trashed: true }));
-  $("#bulkClear").addEventListener("click", () => { state.selected.clear(); renderList(); });
+  $("#bulkbar").addEventListener("change", (e) => {
+    if (e.target.id === "bulkFolder" && e.target.value) {
+      bulkApply({ folder: e.target.value === "__none__" ? "" : e.target.value });
+    }
+  });
 
   $("#newBtn").addEventListener("click", newNote);
   $("#tplList").addEventListener("click", (e) => {
+    const del = e.target.closest("[data-tpldel]");
+    if (del) { e.stopPropagation(); deleteTemplate(del.dataset.tpldel); return; }
+    if (e.target.closest(".tpl-save")) { saveNoteAsTemplate(); return; }
     const b = e.target.closest("[data-tpl]");
     if (b) newFromTemplate(state.templates[+b.dataset.tpl]);
   });
