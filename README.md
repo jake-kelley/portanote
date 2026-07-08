@@ -253,6 +253,7 @@ If the [Claude Code CLI](https://claude.com/claude-code) is installed and logged
 
 - **Quick actions**: *Summarize*, *Improve* (suggestions only, never silent edits), *Extract tasks* (action items land in your To-Do list, linked back to the note), *Suggest tags*.
 - **Free-form**: ask anything about the note or your collection — Claude can search, read, create, and edit notes through Portanote's own MCP tools.
+- **Targeted edits**: highlight lines in the editor before sending and Claude receives those line numbers and their content as the region you mean — "fix this", "rewrite these lines", "expand this section" apply right there. A `✂ Targeting lines N–M` chip above the composer shows what's selected.
 
 How it works and what it can touch: each message spawns a fresh headless `claude` process that connects back to this Portanote instance over localhost. It is restricted to Portanote's note/task tools — no shell, no file access, no web. Anything it changes goes through the same store as the UI (so edits are indexed instantly, and "deleting" is only ever the recoverable trash). Your editor autosaves before each message and locks while Claude works; the note and To-Do list refresh when it finishes.
 

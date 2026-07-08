@@ -57,8 +57,9 @@ type sseEvent struct {
 func claudeChatHandler(store *Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			NoteID  string `json:"noteId"`
-			Message string `json:"message"`
+			NoteID    string           `json:"noteId"`
+			Message   string           `json:"message"`
+			Selection *claudeSelection `json:"selection"`
 		}
 		json.NewDecoder(r.Body).Decode(&req)
 		if strings.TrimSpace(req.Message) == "" {
@@ -105,7 +106,7 @@ func claudeChatHandler(store *Store) http.HandlerFunc {
 			}
 		}
 
-		err := runClaude(r.Context(), store.dir, req.Message, claudeContextPrompt(note), func(text string) {
+		err := runClaude(r.Context(), store.dir, req.Message, claudeContextPrompt(note, req.Selection), func(text string) {
 			emit(sseEvent{Type: "delta", Text: text})
 		})
 		if err != nil {
@@ -128,20 +129,49 @@ func claudeStopHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// claudeSelection is the region the user has highlighted in the note editor,
+// expanded to full 1-based lines by the UI. It pins where an edit or question
+// is aimed.
+type claudeSelection struct {
+	StartLine int    `json:"startLine"`
+	EndLine   int    `json:"endLine"`
+	Text      string `json:"text"`
+}
+
+// valid rejects ranges the UI should never send (and anything not tied to an
+// open note is meaningless — line numbers need a body to count against).
+func (s *claudeSelection) valid() bool {
+	return s != nil && s.StartLine >= 1 && s.EndLine >= s.StartLine && strings.TrimSpace(s.Text) != ""
+}
+
 // claudeContextPrompt situates the CLI inside Portanote. Replies land in a
 // small Markdown side panel, so brevity is part of the contract.
-func claudeContextPrompt(n *Note) string {
+func claudeContextPrompt(n *Note, sel *claudeSelection) string {
 	const rendering = "Replies render as Markdown in a small side panel — keep them concise."
 	if n == nil {
 		return "The user is chatting from Portanote (a local Markdown notes app) with no note open. " +
 			"Use the portanote MCP tools to find, read, and edit notes. " + rendering
 	}
 	tags, _ := json.Marshal(n.Tags)
-	return fmt.Sprintf("The user is in Portanote and currently has this note open: id %q, title %q, "+
+	prompt := fmt.Sprintf("The user is in Portanote and currently has this note open: id %q, title %q, "+
 		"folder %q, tags %s. Operate on this note unless told otherwise; read its body with the "+
 		"read_note tool before answering questions about it or editing it. Edits go through "+
 		"update_note (body is a full replacement). "+rendering,
 		n.ID, n.Title, n.Folder, tags)
+	if sel.valid() {
+		text := sel.Text
+		if len(text) > 8<<10 { // keep the prompt bounded; the full note is a read_note away
+			text = text[:8<<10] + "…"
+		}
+		var lines strings.Builder
+		for i, l := range strings.Split(text, "\n") {
+			fmt.Fprintf(&lines, "%d: %s\n", sel.StartLine+i, l)
+		}
+		prompt += fmt.Sprintf("\n\nThe user has highlighted lines %d-%d of the note (1-based line numbers "+
+			"in the current body). Their message refers to this region — target edits and answers there "+
+			"unless they say otherwise:\n%s", sel.StartLine, sel.EndLine, lines.String())
+	}
+	return prompt
 }
 
 // runClaude spawns one headless CLI turn and forwards its text deltas. A var

@@ -350,6 +350,9 @@ body.dark .cl-error{background:#3a1d1f;color:#e8b4b6;}
 .cl-cursor{display:inline-block;width:7px;height:13px;background:var(--accent);border-radius:2px;
   vertical-align:text-bottom;animation:cl-blink 1s steps(2,start) infinite;}
 @keyframes cl-blink{50%{opacity:0;}}
+.cl-selinfo{margin:6px 12px 0;padding:3px 9px;font-size:11px;color:var(--accent);
+  background:var(--accent-soft);border-radius:6px;}
+.cl-selmeta{display:block;margin-top:3px;font-size:10.5px;opacity:.7;}
 .cl-quick{display:flex;flex-wrap:wrap;gap:5px;padding:8px 12px 0;border-top:1px solid var(--line);}
 .cl-chip{font-size:11.5px;background:var(--chip);border:1px solid var(--chip-line);border-radius:12px;
   padding:2px 9px;color:var(--muted);cursor:pointer;}

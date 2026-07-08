@@ -249,3 +249,55 @@ func TestMetaReportsClaude(t *testing.T) {
 		t.Errorf("meta claude = %v, want false", meta["claude"])
 	}
 }
+
+// ---------------------------------------------------------------- selection
+
+func TestClaudeContextPromptSelection(t *testing.T) {
+	n := &Note{Meta: Meta{ID: "x", Title: "T"}}
+	sel := &claudeSelection{StartLine: 4, EndLine: 5, Text: "alpha\nbeta"}
+	p := claudeContextPrompt(n, sel)
+	for _, want := range []string{"lines 4-5", "4: alpha", "5: beta"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("prompt missing %q:\n%s", want, p)
+		}
+	}
+	// invalid ranges and empty text are ignored, not injected
+	for _, bad := range []*claudeSelection{
+		nil,
+		{StartLine: 0, EndLine: 2, Text: "x"},
+		{StartLine: 3, EndLine: 2, Text: "x"},
+		{StartLine: 1, EndLine: 1, Text: "   "},
+	} {
+		if strings.Contains(claudeContextPrompt(n, bad), "highlighted") {
+			t.Errorf("selection %+v should be ignored", bad)
+		}
+	}
+	// no open note: nothing to count lines against
+	if strings.Contains(claudeContextPrompt(nil, sel), "highlighted") {
+		t.Error("selection without a note should be ignored")
+	}
+}
+
+func TestClaudeChatPassesSelection(t *testing.T) {
+	var gotPrompt string
+	stubClaude(t, "claude-fake", func(ctx context.Context, dir, msg, sys string, emit func(string)) error {
+		gotPrompt = sys
+		emit("ok")
+		return nil
+	})
+	store := newClaudeTestStore(t)
+	n, err := store.Create("Sel Note")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := newAPI(store, fstest.MapFS{})
+	rec := postChat(t, h, `{"noteId":"`+n.ID+`","message":"fix this","selection":{"startLine":2,"endLine":3,"text":"aa\nbb"}}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{"lines 2-3", "2: aa", "3: bb"} {
+		if !strings.Contains(gotPrompt, want) {
+			t.Errorf("system prompt missing %q:\n%s", want, gotPrompt)
+		}
+	}
+}

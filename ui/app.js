@@ -1189,6 +1189,7 @@ function claudeTogglePanel() {
   state.claudeOpen = !state.claudeOpen;
   localStorage.setItem("pn-claude-open", state.claudeOpen ? "1" : "0");
   renderClaudeUI();
+  claudeUpdateSelInfo();
   if (!$("#claudePanel").hidden) $("#claudeInput").focus();
 }
 
@@ -1226,6 +1227,7 @@ function claudeSetStreaming(on) {
   $$(".cl-chip").forEach((b) => (b.disabled = on));
   $("#mdtext").disabled = on;
   $("#title").disabled = on;
+  claudeUpdateSelInfo(); // hidden while streaming; recomputed when the turn ends
 }
 
 async function claudeStop() {
@@ -1241,6 +1243,36 @@ function claudeGrowComposer() {
   ta.style.height = Math.min(ta.scrollHeight, 72) + "px";
 }
 
+// the highlighted region of the note editor, expanded to full 1-based lines
+// (a textarea keeps its selection values even while blurred, so this works
+// when the user has already clicked into the composer)
+function claudeSelection() {
+  const ta = $("#mdtext");
+  if (!state.current || ta.selectionStart === ta.selectionEnd) return null;
+  const v = ta.value;
+  const s = ta.selectionStart;
+  let e = ta.selectionEnd;
+  if (v[e - 1] === "\n") e--;                     // a selection ending on \n shouldn't drag in the next line
+  const ls = s === 0 ? 0 : v.lastIndexOf("\n", s - 1) + 1;
+  let le = v.indexOf("\n", e);
+  if (le < 0) le = v.length;
+  const startLine = (v.slice(0, ls).match(/\n/g) || []).length + 1;
+  const text = v.slice(ls, le);
+  const endLine = startLine + (text.match(/\n/g) || []).length;
+  return { startLine, endLine, text };
+}
+
+// small chip above the composer showing which lines the next message targets
+function claudeUpdateSelInfo() {
+  const el = $("#claudeSelInfo");
+  const sel = state.meta.claude && state.claudeOpen && !state.claudeStreaming ? claudeSelection() : null;
+  if (!sel) { el.hidden = true; return; }
+  el.hidden = false;
+  el.textContent = sel.startLine === sel.endLine
+    ? `✂ Targeting line ${sel.startLine}`
+    : `✂ Targeting lines ${sel.startLine}–${sel.endLine}`;
+}
+
 function claudeSendFromInput() {
   const ta = $("#claudeInput");
   const v = ta.value.trim();
@@ -1254,12 +1286,14 @@ function claudeSendFromInput() {
 async function claudeSend(message) {
   message = (message || "").trim();
   if (!message || state.claudeStreaming || !state.meta.claude) return;
+  const selection = claudeSelection();            // read before save/renders can disturb it
   if (state.dirty) await saveNow();               // Claude reads the saved state
   const noteId = state.current ? state.current.id : "";
 
   state.claudeStopRequested = false;
   state.claudeAtBottom = true;
-  claudeAppendMessage("cl-user", esc(message));
+  claudeAppendMessage("cl-user", esc(message) + (selection
+    ? `<span class="cl-selmeta">✂ lines ${selection.startLine}–${selection.endLine}</span>` : ""));
   const live = claudeAppendMessage("cl-assistant markdown", `<span class="cl-cursor"></span>`);
   claudeSetStreaming(true);
 
@@ -1296,7 +1330,7 @@ async function claudeSend(message) {
   try {
     const r = await fetch("/api/claude/chat", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ noteId, message }),
+      body: JSON.stringify(selection ? { noteId, message, selection } : { noteId, message }),
     });
     if (!r.ok) {                                  // plain JSON: 409 turn running, 503 not installed
       const err = await r.json().catch(() => ({}));
@@ -1642,6 +1676,10 @@ function bindEvents() {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); claudeSendFromInput(); }
     else if (e.key === "Escape") e.target.blur();
   });
+  // highlighted note lines become the next message's target — track live
+  for (const evt of ["select", "keyup", "mouseup"]) {
+    $("#mdtext").addEventListener(evt, claudeUpdateSelInfo);
+  }
   // auto-scroll only while the user is at the bottom of the thread
   $("#claudeThread").addEventListener("scroll", (e) => {
     const t = e.target;
