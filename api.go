@@ -73,6 +73,10 @@ func newAPI(store *Store, uiFS fs.FS) http.Handler {
 			writeErr(w, http.StatusNotFound, err)
 			return
 		}
+		if errors.Is(err, ErrInvalidFolder) {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err)
 			return
@@ -305,6 +309,9 @@ func newAPI(store *Store, uiFS fs.FS) http.Handler {
 	mux.HandleFunc("GET /print/{id}", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFileFS(w, r, uiFS, "print.html")
 	})
+
+	// MCP endpoint — lets MCP clients (Claude Code, Claude Desktop, …) drive the store
+	mux.Handle("/mcp", newMCP(store))
 
 	mux.Handle("/", http.FileServerFS(uiFS))
 	return mux

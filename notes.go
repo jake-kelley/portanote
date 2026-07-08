@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"log"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -30,7 +33,7 @@ type Meta struct {
 type Note struct {
 	Meta
 	Body string `json:"body"`
-	file string // on-disk basename (no .md); tracks date+title, server-only
+	file string // path relative to the notes dir, slash-separated, no ".md"; tracks folder+date+title, server-only
 }
 
 type ListItem struct {
@@ -94,26 +97,46 @@ type FolderInfo struct {
 
 func NewStore(dir string) (*Store, error) {
 	s := &Store{dir: dir, notes: map[string]*Note{}, idx: NewIndex()}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
+	if _, err := os.Stat(dir); err != nil {
 		return nil, err
 	}
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(strings.ToLower(e.Name()), ".md") {
-			continue
+	filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || p == dir {
+			return nil
 		}
-		fileBase := strings.TrimSuffix(e.Name(), filepath.Ext(e.Name()))
-		if !idRe.MatchString(fileBase) {
-			continue
-		}
-		raw, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		rel, err := filepath.Rel(dir, p)
 		if err != nil {
-			continue
+			return nil
 		}
-		n := parseNote(fileBase, string(raw))
+		rel = filepath.ToSlash(rel)
+		if d.IsDir() {
+			// app-owned top-level dirs and dot-dirs are not note folders
+			if strings.HasPrefix(d.Name(), ".") ||
+				(!strings.Contains(rel, "/") && reservedFolders[strings.ToLower(d.Name())]) {
+				return filepath.SkipDir
+			}
+			s.addFolderPathLocked(rel) // real directories (even empty) are the folder tree
+			return nil
+		}
+		if !strings.HasSuffix(strings.ToLower(d.Name()), ".md") {
+			return nil
+		}
+		if base := strings.TrimSuffix(d.Name(), filepath.Ext(d.Name())); !idRe.MatchString(base) {
+			return nil
+		}
+		raw, err := os.ReadFile(p)
+		if err != nil {
+			return nil
+		}
+		n := parseNote(strings.TrimSuffix(rel, filepath.Ext(rel)), string(raw))
+		// the directory a file sits in IS its folder; a frontmatter `folder:`
+		// only means something for legacy root-level files (migrated below)
+		if folder := path.Dir(n.file); folder != "." {
+			n.Folder = folder
+		}
 		// files dropped in by hand have no frontmatter timestamps — use the file's
 		if n.Created.IsZero() || n.Updated.IsZero() {
-			if info, err := e.Info(); err == nil {
+			if info, err := d.Info(); err == nil {
 				if n.Created.IsZero() {
 					n.Created = info.ModTime().UTC()
 				}
@@ -122,16 +145,80 @@ func NewStore(dir string) (*Store, error) {
 				}
 			}
 		}
-		// the map key is the stable ID (from frontmatter, or the filename for
-		// legacy/hand-made notes); n.file is the actual basename on disk
+		// the map key is the stable ID (from frontmatter, or the basename for
+		// legacy/hand-made notes). Hand-made files in different folders can
+		// share a basename — disambiguate; the suffix sticks on first save.
+		if s.notes[n.ID] != nil {
+			for i := 2; ; i++ {
+				if cand := fmt.Sprintf("%s-%d", n.ID, i); s.notes[cand] == nil {
+					n.ID = cand
+					break
+				}
+			}
+		}
 		s.notes[n.ID] = n
 		s.idx.Put(n.ID, n.Title, n.Tags, n.Body)
-	}
-	s.loadFolders()
+		return nil
+	})
+	s.migrateLegacyFolders()
+	s.migrateLegacyNotes()
 	s.seedTemplates()
 	s.loadSettings()
 	s.loadTasks()
 	return s, nil
+}
+
+// migrateLegacyFolders converts the old .portanote-folders.json manifest into
+// real directories, then removes it — directories are the manifest now.
+func (s *Store) migrateLegacyFolders() {
+	p := filepath.Join(s.dir, ".portanote-folders.json")
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		return
+	}
+	var m struct {
+		Folders []string `json:"folders"`
+	}
+	if json.Unmarshal(raw, &m) == nil {
+		for _, f := range dedupeFolders(m.Folders) {
+			if validateFolder(f) != nil {
+				log.Printf("legacy folder %q: reserved name, skipped", f)
+				continue
+			}
+			s.ensureFolderLocked(f)
+		}
+	}
+	os.Remove(p)
+}
+
+// migrateLegacyNotes moves root-level notes that still carry a frontmatter
+// `folder:` (the old flat layout) into that folder's directory. The rewrite
+// also drops the folder field — the file's location carries it from here on.
+func (s *Store) migrateLegacyNotes() {
+	for _, n := range s.notes {
+		if n.Folder == "" || strings.Contains(n.file, "/") {
+			continue
+		}
+		f := cleanFolderPath(n.Folder)
+		if f == "" || validateFolder(f) != nil {
+			log.Printf("note %q: legacy folder %q is a reserved name — leaving uncategorized", n.Title, n.Folder)
+			n.Folder = ""
+			continue
+		}
+		f = s.canonicalFolderLocked(f)
+		if s.ensureFolderLocked(f) != nil {
+			n.Folder = ""
+			continue
+		}
+		oldFile, oldFolder := n.file, n.Folder
+		n.Folder = f
+		n.file = s.uniqueFileLocked(f, oldFile, n.ID)
+		if err := s.write(n); err != nil {
+			n.file, n.Folder = oldFile, oldFolder
+			continue
+		}
+		os.Remove(s.notePath(oldFile))
+	}
 }
 
 func (s *Store) Count() int {
@@ -170,7 +257,7 @@ func (s *Store) Create(title string) (*Note, error) {
 	rand.Read(b)
 	id := now.Format("20060102-150405") + "-" + hex.EncodeToString(b)
 	n := &Note{Meta: Meta{ID: id, Title: title, Tags: []string{}, Created: now, Updated: now}}
-	n.file = s.uniqueFilenameLocked(noteFilename(now, title), id)
+	n.file = s.uniqueFileLocked("", noteFilename(now, title), id)
 	if err := s.write(n); err != nil {
 		return nil, err
 	}
@@ -180,24 +267,22 @@ func (s *Store) Create(title string) (*Note, error) {
 	return &cp, nil
 }
 
-// uniqueFilenameLocked returns base, or base-2/base-3/… if another note already
-// occupies that filename. Caller holds s.mu.
-func (s *Store) uniqueFilenameLocked(base, selfID string) string {
+// uniqueFileLocked returns the dir-relative path (no extension) for a note
+// named base inside folder, suffixing -2/-3/… while another note in the same
+// folder claims that basename (case-insensitively — Windows filesystems are).
+// Caller holds s.mu.
+func (s *Store) uniqueFileLocked(folder, base, selfID string) string {
 	inUse := map[string]bool{}
 	for id, n := range s.notes {
-		if id != selfID {
-			inUse[n.file] = true
+		if id != selfID && strings.EqualFold(n.Folder, folder) {
+			inUse[strings.ToLower(path.Base(n.file))] = true
 		}
 	}
-	if !inUse[base] {
-		return base
+	name := base
+	for i := 2; inUse[strings.ToLower(name)]; i++ {
+		name = fmt.Sprintf("%s-%d", base, i)
 	}
-	for i := 2; ; i++ {
-		cand := fmt.Sprintf("%s-%d", base, i)
-		if !inUse[cand] {
-			return cand
-		}
-	}
+	return relNotePath(folder, name)
 }
 
 type UpdateReq struct {
@@ -216,6 +301,15 @@ func (s *Store) Update(id string, req UpdateReq) (*Note, error) {
 	if !ok {
 		return nil, ErrNotFound
 	}
+	// validate the folder before mutating anything, so a bad name can't half-apply
+	newFolder := n.Folder
+	if req.Folder != nil {
+		f := cleanFolderPath(*req.Folder)
+		if err := validateFolder(f); err != nil {
+			return nil, err
+		}
+		newFolder = s.canonicalFolderLocked(f)
+	}
 	contentChanged := false
 	if req.Title != nil && *req.Title != n.Title {
 		n.Title = *req.Title
@@ -233,13 +327,10 @@ func (s *Store) Update(id string, req UpdateReq) (*Note, error) {
 		}
 	}
 	// folder is organizational (like starred) — a move shouldn't bump the edit time
-	if req.Folder != nil {
-		f := cleanFolderPath(*req.Folder)
-		if f != n.Folder {
-			n.Folder = f
-			if f != "" {
-				s.ensureFolderLocked(f)
-			}
+	if newFolder != n.Folder {
+		n.Folder = newFolder
+		if newFolder != "" {
+			s.addFolderPathLocked(newFolder) // write() below creates the directory
 		}
 	}
 	if req.Starred != nil {
@@ -252,14 +343,16 @@ func (s *Store) Update(id string, req UpdateReq) (*Note, error) {
 	if contentChanged {
 		n.Updated = time.Now().UTC().Truncate(time.Second)
 	}
-	// keep the on-disk filename in sync with the title (date stays as created)
+	// keep the on-disk location in sync with the folder and title (date stays as created)
 	oldFile := n.file
-	n.file = s.uniqueFilenameLocked(noteFilename(n.Created, n.Title), n.ID)
+	n.file = s.uniqueFileLocked(n.Folder, noteFilename(n.Created, n.Title), n.ID)
 	if err := s.write(n); err != nil {
 		return nil, err
 	}
-	if oldFile != "" && oldFile != n.file {
-		os.Remove(filepath.Join(s.dir, oldFile+".md"))
+	// EqualFold: on a case-insensitive filesystem a case-only "move" rewrites
+	// the same physical file — removing the old path would delete the new one
+	if oldFile != "" && !strings.EqualFold(oldFile, n.file) {
+		os.Remove(s.notePath(oldFile))
 	}
 	s.idx.Put(id, n.Title, n.Tags, n.Body)
 	cp := *n
@@ -274,7 +367,7 @@ func (s *Store) Delete(id string) error {
 	if !ok {
 		return ErrNotFound
 	}
-	if err := os.Remove(filepath.Join(s.dir, n.file+".md")); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(s.notePath(n.file)); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	delete(s.notes, id)
@@ -369,24 +462,41 @@ func (s *Store) Search(q string, includeTrashed bool) []SearchResult {
 
 // ---------------------------------------------------------------- files
 
+// notePath maps a note's dir-relative slash path (no extension) to disk.
+func (s *Store) notePath(rel string) string {
+	return filepath.Join(s.dir, filepath.FromSlash(rel)+".md")
+}
+
+// relNotePath joins a folder path and a file basename into the note's
+// dir-relative slash path (no extension).
+func relNotePath(folder, base string) string {
+	if folder == "" {
+		return base
+	}
+	return folder + "/" + base
+}
+
 func (s *Store) write(n *Note) error {
 	if n.file == "" {
-		n.file = noteFilename(n.Created, n.Title)
+		n.file = relNotePath(n.Folder, noteFilename(n.Created, n.Title))
 	}
-	path := filepath.Join(s.dir, n.file+".md")
-	tmp := path + ".tmp"
+	dst := s.notePath(n.file)
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	tmp := dst + ".tmp"
 	if err := os.WriteFile(tmp, []byte(serializeNote(n)), 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	return os.Rename(tmp, dst)
 }
 
 func serializeNote(n *Note) string {
 	var b strings.Builder
+	// no folder field: the note's directory IS its folder
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, "id: %q\n", n.ID)
 	fmt.Fprintf(&b, "title: %q\n", n.Title)
-	fmt.Fprintf(&b, "folder: %q\n", n.Folder)
 	b.WriteString("tags: [")
 	for i, t := range n.Tags {
 		if i > 0 {
@@ -404,9 +514,9 @@ func serializeNote(n *Note) string {
 	return b.String()
 }
 
-func parseNote(fileBase, raw string) *Note {
-	// ID defaults to the filename; frontmatter `id:` overrides it if present.
-	n := &Note{Meta: Meta{ID: fileBase, Tags: []string{}}, file: fileBase}
+func parseNote(relPath, raw string) *Note {
+	// ID defaults to the file's basename; frontmatter `id:` overrides it if present.
+	n := &Note{Meta: Meta{ID: path.Base(relPath), Tags: []string{}}, file: relPath}
 	body := raw
 	if strings.HasPrefix(raw, "---\n") || strings.HasPrefix(raw, "---\r\n") {
 		rest := raw[strings.Index(raw, "\n")+1:]
@@ -419,7 +529,7 @@ func parseNote(fileBase, raw string) *Note {
 	}
 	n.Body = body
 	if n.Title == "" {
-		n.Title = deriveTitle(fileBase, body)
+		n.Title = deriveTitle(path.Base(relPath), body)
 	}
 	return n
 }
@@ -450,7 +560,7 @@ func parseFrontmatter(fm string, n *Note) {
 			}
 		case "title":
 			n.Title = unquote(val)
-		case "folder":
+		case "folder": // legacy (pre-directory layout); read only to migrate
 			n.Folder = unquote(val)
 		case "tags":
 			val = strings.Trim(val, "[]")
@@ -589,26 +699,82 @@ func slicesEqual(a, b []string) bool {
 
 // ---------------------------------------------------------------- folders
 //
-// Folders form a tree: a folder is a "/"-separated path like "Work/Projects/Alpha".
-// A note's Folder field holds one such path; ancestor paths are kept in the
-// manifest so intermediate (even empty) folders render in the tree.
+// Folders form a tree: a folder is a "/"-separated path like "Work/Projects/Alpha",
+// and each one is a real subdirectory of the notes dir — the directory tree IS
+// the folder tree, so any file manager or editor sees the same structure.
+// s.folders is just the in-memory index of it (kept so empty folders render
+// without rescanning).
 
-// cleanFolderPath sanitizes each "/"-separated segment and drops empty ones.
+// reservedFolders are the app-owned top-level directories inside the notes
+// dir — the scanner skips them, so notes can't live there.
+var reservedFolders = map[string]bool{"templates": true, "backups": true, "attachments": true}
+
+// Windows rejects these as file or directory names, whatever the extension.
+var reservedDeviceRe = regexp.MustCompile(`^(?i:con|prn|aux|nul|com[1-9]|lpt[1-9])$`)
+
+var ErrInvalidFolder = errors.New("invalid folder name")
+
+// validateFolder rejects folder paths that can't be real directories: a first
+// segment that collides with an app-owned dir, or any Windows device name.
+func validateFolder(p string) error {
+	if p == "" {
+		return nil
+	}
+	segs := strings.Split(p, "/")
+	if reservedFolders[strings.ToLower(segs[0])] {
+		return fmt.Errorf("%w: %q is reserved for Portanote itself", ErrInvalidFolder, segs[0])
+	}
+	for _, seg := range segs {
+		if reservedDeviceRe.MatchString(seg) {
+			return fmt.Errorf("%w: %q is a reserved name on Windows", ErrInvalidFolder, seg)
+		}
+	}
+	return nil
+}
+
+// cleanFolderPath sanitizes each "/"-separated segment down to what every
+// filesystem accepts (folders are real directories): control characters and
+// Windows-special characters are stripped, leading/trailing dots and spaces
+// trimmed, empty segments dropped — so "../x" cannot escape the notes dir.
 func cleanFolderPath(path string) string {
 	segs := strings.Split(path, "/")
 	out := make([]string, 0, len(segs))
 	for _, seg := range segs {
 		seg = strings.Map(func(r rune) rune {
-			if r < 0x20 || r == '\\' {
+			if r < 0x20 || strings.ContainsRune(`\<>:"|?*`, r) {
 				return -1
 			}
 			return r
 		}, seg)
-		if seg = strings.TrimSpace(seg); seg != "" {
+		if seg = strings.Trim(seg, ". "); seg != "" {
 			out = append(out, seg)
 		}
 	}
 	return strings.Join(out, "/")
+}
+
+// canonicalFolderLocked snaps each path segment to the casing of an existing
+// folder (Windows treats "work" and "Work" as one directory — so do we).
+// Caller holds s.mu (or is still single-threaded in NewStore).
+func (s *Store) canonicalFolderLocked(p string) string {
+	if p == "" {
+		return ""
+	}
+	cur := ""
+	for i, seg := range strings.Split(p, "/") {
+		if i == 0 {
+			cur = seg
+		} else {
+			cur += "/" + seg
+		}
+		for _, f := range s.folders {
+			if strings.EqualFold(f, cur) {
+				cur = f
+				break
+			}
+		}
+	}
+	return cur
 }
 
 // ancestorPaths returns the ancestors of p, nearest-root first (excludes p).
@@ -669,28 +835,68 @@ func (s *Store) CreateFolder(path string) (string, error) {
 	if path == "" {
 		return "", errors.New("folder name required")
 	}
+	if err := validateFolder(path); err != nil {
+		return "", err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, f := range s.folders {
-		if strings.EqualFold(f, path) {
-			return f, nil // already exists — return canonical
-		}
+	path = s.canonicalFolderLocked(path)
+	if err := s.ensureFolderLocked(path); err != nil {
+		return "", err
 	}
-	s.addFolderPathLocked(path)
-	return path, s.saveFolders()
+	return path, nil
 }
 
-// RenameFolder renames a folder and re-homes the whole subtree beneath it
-// (both the manifest and every affected note). Passing a `to` with a different
-// parent effectively moves the subtree.
+// RenameFolder renames a folder's directory — note files move with it, so the
+// whole subtree re-homes with a single rename on disk. Passing a `to` with a
+// different parent moves the subtree.
 func (s *Store) RenameFolder(from, to string) error {
 	from = cleanFolderPath(from)
 	to = cleanFolderPath(to)
 	if from == "" || to == "" {
 		return errors.New("folder name required")
 	}
+	if err := validateFolder(to); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	from = s.canonicalFolderLocked(from)
+	// snap the destination's parent to existing casing; the leaf stays as
+	// typed so a case-only rename ("work" -> "Work") still goes through
+	if i := strings.LastIndex(to, "/"); i >= 0 {
+		to = s.canonicalFolderLocked(to[:i]) + "/" + to[i+1:]
+	}
+	if from == to {
+		return nil
+	}
+	found := false
+	for _, f := range s.folders {
+		if f == from {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return errors.New("folder not found")
+	}
+	// a case-only rename targets the same directory; anything else must not
+	// land on an existing one (directories don't merge)
+	if !strings.EqualFold(from, to) {
+		if underFolder(to, from) {
+			return errors.New("cannot move a folder inside itself")
+		}
+		if _, err := os.Stat(filepath.Join(s.dir, filepath.FromSlash(to))); err == nil {
+			return fmt.Errorf("a folder named %q already exists", to)
+		}
+	}
+	dst := filepath.Join(s.dir, filepath.FromSlash(to))
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	if err := os.Rename(filepath.Join(s.dir, filepath.FromSlash(from)), dst); err != nil {
+		return err
+	}
 	remap := func(p string) (string, bool) {
 		if strings.EqualFold(p, from) {
 			return to, true
@@ -707,96 +913,79 @@ func (s *Store) RenameFolder(from, to string) error {
 	}
 	s.addFolderPathLocked(to)
 	s.folders = dedupeFolders(s.folders)
+	// the files moved with their directory — only in-memory paths need fixing
 	for _, n := range s.notes {
 		if np, ok := remap(n.Folder); ok {
 			n.Folder = np
-			if err := s.write(n); err != nil {
-				return err
-			}
+			n.file = relNotePath(np, path.Base(n.file))
 		}
 	}
-	return s.saveFolders()
+	return nil
 }
 
 // DeleteFolder removes a folder and its whole subtree; notes anywhere in that
-// subtree become uncategorized (they are not deleted).
-func (s *Store) DeleteFolder(path string) error {
-	path = cleanFolderPath(path)
+// subtree move back to the notes root (they are not deleted). Directories are
+// then removed deepest-first, and one still holding files Portanote doesn't
+// know about is left on disk (it reappears as a folder on the next start)
+// rather than deleting anything the app doesn't own.
+func (s *Store) DeleteFolder(folder string) error {
+	folder = cleanFolderPath(folder)
+	if folder == "" {
+		return errors.New("folder name required")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	folder = s.canonicalFolderLocked(folder)
+	for _, n := range s.notes {
+		if n.Folder == "" || !underFolder(n.Folder, folder) {
+			continue
+		}
+		oldFile, oldFolder := n.file, n.Folder
+		n.Folder = ""
+		n.file = s.uniqueFileLocked("", path.Base(oldFile), n.ID)
+		if err := os.Rename(s.notePath(oldFile), s.notePath(n.file)); err != nil {
+			n.file, n.Folder = oldFile, oldFolder
+			return err
+		}
+	}
 	kept := s.folders[:0:0]
 	for _, f := range s.folders {
-		if !underFolder(f, path) {
+		if !underFolder(f, folder) {
 			kept = append(kept, f)
 		}
 	}
 	s.folders = kept
-	for _, n := range s.notes {
-		if n.Folder != "" && underFolder(n.Folder, path) {
-			n.Folder = ""
-			if err := s.write(n); err != nil {
-				return err
-			}
-		}
-	}
-	return s.saveFolders()
+	removeEmptyDirs(filepath.Join(s.dir, filepath.FromSlash(folder)))
+	return nil
 }
 
-// ensureFolderLocked adds a folder path (and ancestors) if missing, then saves.
-// Caller holds s.mu.
-func (s *Store) ensureFolderLocked(path string) {
-	before := len(s.folders)
-	s.addFolderPathLocked(path)
-	if len(s.folders) != before {
-		s.saveFolders()
+// removeEmptyDirs deletes root and any directories under it that are empty,
+// deepest first; os.Remove refuses non-empty directories, which is exactly
+// the safety net wanted here.
+func removeEmptyDirs(root string) {
+	var dirs []string
+	filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err == nil && d.IsDir() {
+			dirs = append(dirs, p)
+		}
+		return nil
+	})
+	for i := len(dirs) - 1; i >= 0; i-- {
+		os.Remove(dirs[i])
 	}
 }
 
-func (s *Store) foldersPath() string {
-	return filepath.Join(s.dir, ".portanote-folders.json")
-}
-
-// loadFolders reads the manifest and folds in any folder a note references
-// but the manifest doesn't list yet (e.g. hand-edited frontmatter).
-func (s *Store) loadFolders() {
-	if raw, err := os.ReadFile(s.foldersPath()); err == nil {
-		var m struct {
-			Folders []string `json:"folders"`
-		}
-		if json.Unmarshal(raw, &m) == nil {
-			s.folders = dedupeFolders(m.Folders)
-		}
+// ensureFolderLocked makes the folder's directory (and ancestors) exist on
+// disk and registers it in the in-memory list. Caller holds s.mu.
+func (s *Store) ensureFolderLocked(folder string) error {
+	if folder == "" {
+		return nil
 	}
-	seen := map[string]bool{}
-	for _, f := range s.folders {
-		seen[strings.ToLower(f)] = true
-	}
-	extra := map[string]string{}
-	for _, n := range s.notes {
-		if n.Folder != "" && !seen[strings.ToLower(n.Folder)] {
-			extra[strings.ToLower(n.Folder)] = n.Folder
-		}
-	}
-	names := make([]string, 0, len(extra))
-	for _, v := range extra {
-		names = append(names, v)
-	}
-	sort.Slice(names, func(i, j int) bool { return strings.ToLower(names[i]) < strings.ToLower(names[j]) })
-	s.folders = append(s.folders, names...)
-	// backfill any missing ancestors so the tree has no gaps
-	for _, f := range append([]string{}, s.folders...) {
-		s.addFolderPathLocked(f)
-	}
-	s.folders = dedupeFolders(s.folders)
-}
-
-func (s *Store) saveFolders() error {
-	raw, _ := json.MarshalIndent(map[string][]string{"folders": s.folders}, "", "  ")
-	tmp := s.foldersPath() + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o644); err != nil {
+	if err := os.MkdirAll(filepath.Join(s.dir, filepath.FromSlash(folder)), 0o755); err != nil {
 		return err
 	}
-	return os.Rename(tmp, s.foldersPath())
+	s.addFolderPathLocked(folder)
+	return nil
 }
 
 func dedupeFolders(in []string) []string {

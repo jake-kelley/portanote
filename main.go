@@ -1,5 +1,6 @@
 // Portanote — a portable, single-binary notes app.
-// Notes are plain .md files with YAML frontmatter; the UI is embedded
+// Notes are plain .md files with YAML frontmatter, organized in real
+// subdirectories that mirror the folder tree; the UI is embedded
 // and served to your default browser on localhost only.
 package main
 
@@ -17,7 +18,7 @@ import (
 	"runtime"
 )
 
-const version = "1.0.1"
+const version = "1.1.0"
 
 //go:embed all:ui
 var uiEmbed embed.FS
@@ -78,6 +79,7 @@ func main() {
 	ln, actualPort := listen(bindHost, *port)
 	localURL := fmt.Sprintf("http://127.0.0.1:%d", actualPort)
 	log.Printf("serving at %s  (Ctrl+C to quit)", localURL)
+	log.Printf("MCP endpoint at %s/mcp  (Streamable HTTP)", localURL)
 
 	if subnetMode {
 		log.Printf("on your network:  http://%s:%d", lanIP(), actualPort)
