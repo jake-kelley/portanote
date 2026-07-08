@@ -874,6 +874,7 @@ async function loadClaudeConfigUI() {
     $("#setClaudeExe").placeholder = c.detectedExe || "not found — enter a path";
     $("#setClaudeSettings").value = c.settingsFile || c.detectedSettings || "";
     $("#setClaudeSettings").placeholder = c.detectedSettings || "claude default";
+    $("#setClaudeEnv").value = (c.env || []).join("\n");
     renderClaudeCfgStatus(c);
   } catch {
     $("#claudeCfgStatus").textContent = "Could not load Claude settings.";
@@ -884,12 +885,14 @@ async function saveClaudeConfig() {
   const btn = $("#claudeCfgSave");
   btn.disabled = true;
   try {
+    const env = $("#setClaudeEnv").value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
     const c = await fetch("/api/claude/config", {
       method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ exe: $("#setClaudeExe").value.trim(), settingsFile: $("#setClaudeSettings").value.trim() }),
+      body: JSON.stringify({ exe: $("#setClaudeExe").value.trim(), settingsFile: $("#setClaudeSettings").value.trim(), env }),
     }).then((r) => r.json());
     $("#setClaudeExe").value = c.exe || c.detectedExe || "";
     $("#setClaudeSettings").value = c.settingsFile || c.detectedSettings || "";
+    $("#setClaudeEnv").value = (c.env || []).join("\n");
     renderClaudeCfgStatus(c);
     // availability may have changed — refresh meta so the panel button appears/hides now
     state.meta = await fetch("/api/meta").then((r) => r.json());

@@ -239,6 +239,9 @@ table.cheat code{background:var(--chip);border:1px solid var(--chip-line);border
 .setting-row input{width:64px;border:1px solid var(--line);border-radius:6px;padding:5px 8px;background:var(--bg2);color:var(--ink);}
 .setting-row.col{flex-direction:column;align-items:stretch;gap:5px;}
 .setting-row.col input{width:100%;font-size:12.5px;}
+.setting-row.col textarea{width:100%;font-size:12px;border:1px solid var(--line);border-radius:6px;
+  padding:6px 8px;background:var(--bg2);color:var(--ink);resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+.setting-row.col textarea:focus{border-color:var(--accent);outline:none;}
 .setting-row .mhint{font-size:10.5px;color:var(--muted);font-weight:400;}
 .cl-log{max-height:190px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;margin-top:4px;}
 .cl-log-empty{color:var(--muted);font-size:12px;font-style:italic;padding:10px 12px;}

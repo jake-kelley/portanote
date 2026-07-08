@@ -238,7 +238,8 @@ var runClaude = func(ctx context.Context, dir, message, sysPrompt string, emit f
 	}
 	cmd := exec.CommandContext(ctx, claudePath(), args...)
 	cmd.Dir = dir
-	cmd.Stdin = bytes.NewReader(nil) // an open stdin makes the CLI sit waiting on it
+	cmd.Env = claudeSpawnEnv()        // nil = inherit; else inherited + configured overrides
+	cmd.Stdin = bytes.NewReader(nil)  // an open stdin makes the CLI sit waiting on it
 	cmd.SysProcAttr = noWindowAttr()
 	stderr := &limitedBuffer{max: 8 << 10}
 	cmd.Stderr = stderr

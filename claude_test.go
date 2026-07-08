@@ -472,3 +472,48 @@ func TestClaudeChatRecordsLog(t *testing.T) {
 		t.Errorf("ok turn not logged right: %+v", logs[1])
 	}
 }
+
+func TestClaudeSpawnEnv(t *testing.T) {
+	loadClaudeConfig(t.TempDir())
+	if claudeSpawnEnv() != nil {
+		t.Error("no configured env should inherit (nil), not build a slice")
+	}
+	claudeCfg.mu.Lock()
+	claudeCfg.data.Env = []string{"NODE_EXTRA_CA_CERTS=/tmp/ca.crt", "   ", "BAD_NO_EQUALS", "HTTPS_PROXY=http://p:8080"}
+	claudeCfg.mu.Unlock()
+	env := claudeSpawnEnv()
+	if len(env) <= len(os.Environ()) {
+		t.Fatalf("configured vars not appended to the inherited env (%d vs %d)", len(env), len(os.Environ()))
+	}
+	joined := strings.Join(env, "\n")
+	if !strings.Contains(joined, "NODE_EXTRA_CA_CERTS=/tmp/ca.crt") || !strings.Contains(joined, "HTTPS_PROXY=http://p:8080") {
+		t.Errorf("configured vars missing from spawn env")
+	}
+	if strings.Contains(joined, "BAD_NO_EQUALS") {
+		t.Error("entry without = should be dropped")
+	}
+	// ours come last so they override any inherited duplicate
+	last := env[len(env)-2:]
+	if !strings.HasPrefix(last[0], "NODE_EXTRA_CA_CERTS=") || !strings.HasPrefix(last[1], "HTTPS_PROXY=") {
+		t.Errorf("configured vars should be appended last, got %v", last)
+	}
+}
+
+func TestClaudeConfigEnvRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	loadClaudeConfig(dir)
+	h := newAPI(newClaudeTestStore(t), fstest.MapFS{})
+	body := `{"exe":"","settingsFile":"","env":["NODE_EXTRA_CA_CERTS=/x/ca.crt","  ","no_equals_here"]}`
+	req := httptest.NewRequest("PUT", "/api/claude/config", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	var got claudeConfigResp
+	json.Unmarshal(rec.Body.Bytes(), &got)
+	if len(got.Env) != 1 || got.Env[0] != "NODE_EXTRA_CA_CERTS=/x/ca.crt" {
+		t.Fatalf("env not sanitized/stored: %v", got.Env)
+	}
+	loadClaudeConfig(dir) // reload from disk
+	if len(claudeCfg.data.Env) != 1 {
+		t.Errorf("env not persisted: %v", claudeCfg.data.Env)
+	}
+}

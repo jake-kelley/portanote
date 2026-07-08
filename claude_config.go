@@ -19,8 +19,9 @@ import (
 )
 
 type claudeConfigData struct {
-	Exe          string `json:"exe"`          // override for the claude binary; "" = auto-detect
-	SettingsFile string `json:"settingsFile"` // custom --settings file; "" = claude's default
+	Exe          string   `json:"exe"`            // override for the claude binary; "" = auto-detect
+	SettingsFile string   `json:"settingsFile"`   // custom --settings file; "" = claude's default
+	Env          []string `json:"env,omitempty"`  // extra KEY=VALUE vars for the spawned claude
 }
 
 var claudeCfg struct {
@@ -104,25 +105,53 @@ func effectiveClaudeSettings() string {
 	return detectedClaudeSettings()
 }
 
+// sanitizeClaudeEnv keeps only well-formed KEY=VALUE entries (trimmed).
+func sanitizeClaudeEnv(in []string) []string {
+	out := []string{}
+	for _, e := range in {
+		e = strings.TrimSpace(e)
+		if k, _, ok := strings.Cut(e, "="); ok && strings.TrimSpace(k) != "" {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// claudeSpawnEnv is the environment for the spawned claude: the inherited
+// environment with the configured KEY=VALUE vars appended so they win (used
+// for e.g. NODE_EXTRA_CA_CERTS behind a TLS-inspecting proxy). Returns nil
+// when nothing is configured, so the child simply inherits as before.
+func claudeSpawnEnv() []string {
+	claudeCfg.mu.RLock()
+	extra := sanitizeClaudeEnv(claudeCfg.data.Env)
+	claudeCfg.mu.RUnlock()
+	if len(extra) == 0 {
+		return nil
+	}
+	return append(os.Environ(), extra...)
+}
+
 type claudeConfigResp struct {
-	Exe               string `json:"exe"`
-	SettingsFile      string `json:"settingsFile"`
-	DetectedExe       string `json:"detectedExe"`
-	DetectedSettings  string `json:"detectedSettings"`
-	EffectiveExe      string `json:"effectiveExe"`
-	EffectiveSettings string `json:"effectiveSettings"`
-	Available         bool   `json:"available"`
-	ExeWarning        string `json:"exeWarning,omitempty"`
-	SettingsWarning   string `json:"settingsWarning,omitempty"`
+	Exe               string   `json:"exe"`
+	SettingsFile      string   `json:"settingsFile"`
+	Env               []string `json:"env"`
+	DetectedExe       string   `json:"detectedExe"`
+	DetectedSettings  string   `json:"detectedSettings"`
+	EffectiveExe      string   `json:"effectiveExe"`
+	EffectiveSettings string   `json:"effectiveSettings"`
+	Available         bool     `json:"available"`
+	ExeWarning        string   `json:"exeWarning,omitempty"`
+	SettingsWarning   string   `json:"settingsWarning,omitempty"`
 }
 
 func claudeConfigResponse() claudeConfigResp {
 	claudeCfg.mu.RLock()
-	exe, settings := claudeCfg.data.Exe, claudeCfg.data.SettingsFile
+	exe, settings, env := claudeCfg.data.Exe, claudeCfg.data.SettingsFile, claudeCfg.data.Env
 	claudeCfg.mu.RUnlock()
 	resp := claudeConfigResp{
 		Exe:               exe,
 		SettingsFile:      settings,
+		Env:               sanitizeClaudeEnv(env),
 		DetectedExe:       detectedClaudeExe(),
 		DetectedSettings:  detectedClaudeSettings(),
 		EffectiveExe:      resolveClaudeExe(),
@@ -157,6 +186,7 @@ func claudeConfigHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		claudeCfg.mu.Lock()
 		claudeCfg.data.Exe, claudeCfg.data.SettingsFile = exe, settings
+		claudeCfg.data.Env = sanitizeClaudeEnv(in.Env)
 		saveClaudeConfigLocked()
 		claudeCfg.mu.Unlock()
 	}
