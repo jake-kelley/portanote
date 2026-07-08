@@ -15,7 +15,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -31,10 +34,42 @@ var claudeLook struct {
 }
 
 // claudePath returns the claude CLI's location ("" if not installed). A var
-// so tests can stub availability; the real lookup runs once.
+// so tests can stub availability; the real lookup runs once. PATH is tried
+// first, then the usual install locations — a launchd-started process (macOS
+// autostart, Finder) gets a minimal PATH that lacks ~/.local/bin and Homebrew.
 var claudePath = func() string {
-	claudeLook.once.Do(func() { claudeLook.path, _ = exec.LookPath("claude") })
+	claudeLook.once.Do(func() { claudeLook.path = findClaude() })
 	return claudeLook.path
+}
+
+func findClaude() string {
+	if p, err := exec.LookPath("claude"); err == nil {
+		return p
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	name := "claude"
+	if runtime.GOOS == "windows" {
+		name = "claude.exe"
+	}
+	candidates := []string{
+		filepath.Join(home, ".local", "bin", name),    // native installer default
+		filepath.Join(home, ".claude", "local", name), // older "claude migrate-installer" location
+	}
+	if runtime.GOOS != "windows" {
+		candidates = append(candidates,
+			"/opt/homebrew/bin/claude", // Homebrew (Apple Silicon)
+			"/usr/local/bin/claude",    // Homebrew (Intel) / npm -g
+		)
+	}
+	for _, c := range candidates {
+		if st, err := os.Stat(c); err == nil && !st.IsDir() {
+			return c
+		}
+	}
+	return ""
 }
 
 func claudeAvailable() bool { return claudePath() != "" }

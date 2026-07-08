@@ -20,7 +20,7 @@ import (
 )
 
 // a var so test builds can override it with -ldflags "-X main.version=..."
-var version = "1.5.0"
+var version = "1.5.1"
 
 //go:embed all:ui
 var uiEmbed embed.FS
@@ -91,6 +91,11 @@ func main() {
 	localURL := fmt.Sprintf("http://127.0.0.1:%d", actualPort)
 	log.Printf("serving at %s  (Ctrl+C to quit)", localURL)
 	log.Printf("MCP endpoint at %s/mcp  (Streamable HTTP)", localURL)
+	if p := claudePath(); p != "" {
+		log.Printf("Ask Claude enabled: %s", p)
+	} else {
+		log.Printf("Ask Claude disabled: no claude CLI found (install Claude Code to enable)")
+	}
 
 	if subnetMode {
 		log.Printf("on your network:  http://%s:%d", lanIP(), actualPort)

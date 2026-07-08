@@ -6,6 +6,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -299,5 +302,34 @@ func TestClaudeChatPassesSelection(t *testing.T) {
 		if !strings.Contains(gotPrompt, want) {
 			t.Errorf("system prompt missing %q:\n%s", want, gotPrompt)
 		}
+	}
+}
+
+// ---------------------------------------------------------------- discovery
+
+// A launchd-started process (macOS autostart, Finder) has a minimal PATH, so
+// discovery must fall back to the known install locations.
+func TestFindClaudeFallsBackToLocalBin(t *testing.T) {
+	home := t.TempDir()
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", home)
+	} else {
+		t.Setenv("HOME", home)
+	}
+	t.Setenv("PATH", "")
+	name := "claude"
+	if runtime.GOOS == "windows" {
+		name = "claude.exe"
+	}
+	dir := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(dir, name)
+	if err := os.WriteFile(want, []byte("stub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := findClaude(); got != want {
+		t.Errorf("findClaude() = %q, want %q", got, want)
 	}
 }
