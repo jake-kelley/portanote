@@ -20,6 +20,7 @@ const state = {
   dragging: null,
   q: "",
   results: null,        // search results when q is non-empty
+  searchGlobal: false,  // an active folder scopes the search; this widens it back to all notes
   current: null,        // full Note being edited
   mode: localStorage.getItem("pn-mode") || "split",
   sort: localStorage.getItem("pn-sort") || "updated",
@@ -115,10 +116,15 @@ function highlight(text, q) {
 }
 
 function visibleNotes() {
-  // active search (free text and/or operators): global, filtered by operators
+  // active search (free text and/or operators), filtered by operators
   if (state.q) {
     const p = state.parsed;
     let list = (state.results ? [...state.results] : [...state.notes]).filter((n) => matchesFilters(n, p));
+    // an open folder scopes the search to its subtree, unless the user chose
+    // "search all notes" or typed an explicit folder: operator (which wins)
+    if (state.folder && !state.searchGlobal && !p.folders.length) {
+      list = list.filter((n) => n.folder === state.folder || (n.folder || "").startsWith(state.folder + "/"));
+    }
     if (!state.results) list.sort((a, b) => new Date(b.updated) - new Date(a.updated)); // else keep score order
     return list;
   }
@@ -378,11 +384,14 @@ function renderList() {
   // drop selections that are no longer visible
   for (const id of [...state.selected]) if (!list.some((n) => n.id === id)) state.selected.delete(id);
   renderBulkBar();
+  renderSearchScope();
+  $("#search").placeholder = state.folder ? `Search in ${state.folder}…  (Ctrl+K)` : "Search…  (Ctrl+K)";
   $("#listTitle").textContent = state.folder ? state.folder : state.tag ? "#" + state.tag :
     { all: "Notes", starred: "Starred", untagged: "Untagged", trash: "Trash" }[state.view];
 
   if (!list.length) {
-    const msg = state.q ? "No results for “" + esc(state.q) + "”"
+    const scoped = state.q && state.folder && !state.searchGlobal && !(state.parsed?.folders.length);
+    const msg = state.q ? "No results for “" + esc(state.q) + "”" + (scoped ? " in 📁 " + esc(state.folder) : "")
       : state.view === "trash" ? "Trash is empty"
       : state.folder ? "This folder is empty.<br>Open a note and pick this folder, or make a new one here."
       : "No notes here yet.<br>Press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>N</kbd> to create one.";
@@ -729,7 +738,7 @@ async function newFromTemplate(tpl) {
   n.body = tpl.body || "";
   state.notes.unshift({ ...n, snippet: "" });
   if (state.view === "trash" || state.tag) { state.view = "all"; state.tag = null; }
-  state.q = ""; state.results = null; $("#search").value = "";
+  state.q = ""; state.results = null; state.searchGlobal = false; $("#search").value = "";
   state.current = n;
   renderAll();
   await saveNow();  // persist the template body + folder
@@ -744,7 +753,7 @@ async function newNote() {
   n.folder = targetFolder;
   state.notes.unshift({ ...n, snippet: "" });
   if (state.view === "trash" || state.tag) { state.view = "all"; state.tag = null; }
-  state.q = ""; state.results = null; $("#search").value = "";
+  state.q = ""; state.results = null; state.searchGlobal = false; $("#search").value = "";
   state.current = n;
   renderAll();
   if (targetFolder) await saveNow();
@@ -959,11 +968,25 @@ function matchesFilters(n, p) {
   return true;
 }
 
+// scope toggle under the search box: shown only while searching inside a folder
+// (the Notes view is already global); an explicit folder: operator suppresses it
+function renderSearchScope() {
+  const el = $("#searchScope");
+  if (!state.folder || !state.q || state.parsed?.folders.length) {
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
+  el.innerHTML = state.searchGlobal
+    ? `Searching <b>all notes</b> — click to search only 📁 <b>${esc(state.folder)}</b>`
+    : `Searching in 📁 <b>${esc(state.folder)}</b> — click to search all notes`;
+}
+
 async function runSearch() {
   const raw = $("#search").value.trim();
   state.q = raw;
   state.parsed = parseQuery(raw);
-  if (!raw) { state.results = null; renderList(); return; }
+  if (!raw) { state.results = null; state.searchGlobal = false; renderList(); return; }
   const wantTrash = state.parsed.is.includes("trashed") || state.view === "trash";
   if (state.parsed.text) {
     const r = await fetch("/api/search?q=" + encodeURIComponent(state.parsed.text) + (wantTrash ? "&trash=1" : ""));
@@ -1135,14 +1158,14 @@ function bindEvents() {
   $("#views").addEventListener("click", (e) => {
     const a = e.target.closest("a[data-view]");
     if (!a) return;
-    state.view = a.dataset.view; state.tag = null; state.folder = null;
+    state.view = a.dataset.view; state.tag = null; state.folder = null; state.searchGlobal = false;
     runSearch();      // re-run (trash flag differs) then render
     renderAll();
   });
   $("#taglist").addEventListener("click", (e) => {
     const a = e.target.closest("a[data-tag]");
     if (!a) return;
-    state.tag = a.dataset.tag; state.view = "all"; state.folder = null;
+    state.tag = a.dataset.tag; state.view = "all"; state.folder = null; state.searchGlobal = false;
     renderAll();
   });
 
@@ -1155,7 +1178,7 @@ function bindEvents() {
     const del = e.target.closest("[data-del]");
     if (del) { e.stopPropagation(); deleteFolder(del.dataset.del); return; }
     const a = e.target.closest("a[data-folder]");
-    if (a) { state.folder = a.dataset.folder; state.view = "all"; state.tag = null; renderAll(); }
+    if (a) { state.folder = a.dataset.folder; state.view = "all"; state.tag = null; state.searchGlobal = false; renderAll(); }
   });
   $("#folderlist").addEventListener("dblclick", (e) => {
     const a = e.target.closest("a[data-folder]");
@@ -1235,6 +1258,10 @@ function bindEvents() {
   $("#search").addEventListener("input", () => {
     clearTimeout(state.searchTimer);
     state.searchTimer = setTimeout(runSearch, 150);
+  });
+  $("#searchScope").addEventListener("click", () => {
+    state.searchGlobal = !state.searchGlobal;
+    renderList();
   });
   $("#search").addEventListener("keydown", (e) => {
     if (e.key === "Escape") { e.target.value = ""; runSearch(); e.target.blur(); }

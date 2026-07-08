@@ -100,6 +100,10 @@ input,select,textarea{font:inherit;color:inherit;}
 #search{width:100%;padding:8px 12px;border:1px solid var(--line);border-radius:8px;
   background:var(--bg2);outline:none;}
 #search:focus{border-color:var(--accent);}
+#searchScope{display:block;width:100%;margin-top:5px;padding:6px 12px;text-align:left;
+  font-size:11.5px;border:1px solid var(--line);border-radius:8px;background:var(--bg2);
+  color:var(--muted);cursor:pointer;}
+#searchScope:hover{border-color:var(--accent);color:var(--text);}
 #notelist{flex:1;overflow-y:auto;}
 .note-item{display:flex;gap:9px;align-items:flex-start;padding:12px 14px 10px 11px;
   border-bottom:1px solid var(--line);cursor:pointer;border-left:3px solid transparent;}

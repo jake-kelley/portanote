@@ -179,6 +179,8 @@ tag:aws folder:Work/Runbooks is:starred after:2026-06-01 firewall
 
 Supported: `tag:`, `folder:`, `is:starred`, `is:untagged`, `is:trashed`, `after:YYYY-MM-DD`, `before:YYYY-MM-DD`.
 
+Search is **scoped to the folder you're in**: with a folder selected in the sidebar, results come from that folder and its subfolders only, and a bar under the search box lets you flip the same query to all notes (and back). On the top-level *Notes* view search is always global, so no bar appears. An explicit `folder:` operator overrides the scoping either way.
+
 ### To-Do
 
 Open the **To-Do** view for a standalone task list — independent of your notes. Type in the box and press Enter to add a task; check it off to complete; drag the `⠿` handle to reorder; hover for the `✕` to delete; and use **Clear completed** to wipe finished ones. From any note, the toolbar `☑` button creates a task titled after that note and linked to it — the task shows a 🔗 chip you can click to jump back to the note.
