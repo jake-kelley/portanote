@@ -862,6 +862,46 @@ async function saveSettings() {
   renderBackupStatus(st);
   $("#settingsOverlay").hidden = true;
 }
+// re-index the notes folder from disk (external adds/edits/deletes), then refresh
+async function syncNow() {
+  const btn = $("#syncBtn");
+  if (btn.disabled) return;
+  btn.disabled = true;
+  btn.classList.add("spin");
+  try {
+    if (state.dirty) await saveNow();           // don't let the open buffer fight the rescan
+    const res = await fetch("/api/rescan", { method: "POST" }).then((r) => r.json());
+    const [notes, folders, templates] = await Promise.all([
+      fetch("/api/notes").then((r) => r.json()),
+      fetch("/api/folders").then((r) => r.json()),
+      fetch("/api/templates").then((r) => r.json()),
+    ]);
+    state.notes = notes;
+    state.folders = folders.map((f) => f.name);
+    state.templates = templates || [];
+    renderTemplateMenu();
+    if (state.current) {                        // re-fetch the open note; close it if it vanished
+      const r = await fetch("/api/notes/" + encodeURIComponent(state.current.id));
+      if (r.ok) {
+        state.current = await r.json();
+        renderEditor();
+        refreshBacklinks();
+      } else {
+        state.current = null;
+      }
+    }
+    renderAll();
+    const delta = res.added + res.changed + res.removed;
+    btn.title = `Synced — ${res.added} added, ${res.changed} changed, ${res.removed} removed (${res.total} note${res.total === 1 ? "" : "s"} total)`;
+    btn.classList.remove("spin");
+    btn.textContent = delta ? `+${delta}` : "✓";
+    setTimeout(() => { btn.textContent = "⟳"; }, 1500);
+  } finally {
+    btn.classList.remove("spin");
+    btn.disabled = false;
+  }
+}
+
 async function backupNow() {
   $("#backupNowBtn").disabled = true;
   $("#backupNowBtn").textContent = "Backing up…";
@@ -1322,6 +1362,7 @@ function bindEvents() {
 
   // settings modal
   $("#settingsBtn").addEventListener("click", openSettings);
+  $("#syncBtn").addEventListener("click", syncNow);
   $("#settingsClose").addEventListener("click", () => { $("#settingsOverlay").hidden = true; });
   $("#settingsOverlay").addEventListener("click", (e) => {
     if (e.target.id === "settingsOverlay") $("#settingsOverlay").hidden = true;

@@ -439,6 +439,16 @@ var mcpTools = []mcpTool{
 		},
 	},
 	{
+		name: "rescan_notes",
+		description: "Rescan the notes directory and rebuild the index — picks up Markdown files and " +
+			"folders added, edited, or removed outside Portanote (file explorer, git, another editor). " +
+			"Returns counts of added/changed/removed notes.",
+		inputSchema: schema(map[string]any{}),
+		run: func(s *Store, args json.RawMessage) (any, error) {
+			return s.Rescan(), nil
+		},
+	},
+	{
 		name:        "list_tags",
 		description: "List every tag in use with the number of (non-trashed) notes carrying it.",
 		inputSchema: schema(map[string]any{}),

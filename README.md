@@ -21,6 +21,7 @@
 - **Rich rendering** — syntax highlighting for the common languages plus **PowerShell, Splunk SPL, Dockerfile, and nginx**, and **Mermaid diagrams** (```` ```mermaid ````) drawn live in the preview and in exports.
 - **Wiki-links & backlinks** — `[[Note Title]]` (or `[[Title|alias]]`) links notes together, and each note shows a "Linked references" panel of what points to it.
 - **Nested folders** — organize notes in a real `Work/Runbooks/AWS`-style tree, with drag-and-drop, subtree counts, and collapsible groups. Folders are real subdirectories of `notes/`, so your file manager, `grep`, and other editors see the same structure.
+- **Sync with disk** — the `⟳` button in the sidebar re-indexes the notes folder on demand, adopting files and folders you added, edited, or removed outside the app (file explorer, git, another editor) without a restart.
 - **Fast search with operators** — an in-memory full-text index (search-as-you-type), plus `tag:`, `folder:`, `is:starred` / `is:untagged` / `is:trashed`, `after:`, and `before:`.
 - **Auto-tag suggestions** — an offline pass over your note titles and headers proposes topic tags under the tag row; one click accepts. Nothing is sent anywhere.
 - **A standalone To-Do list** — add / complete / reorder (drag) / delete tasks and clear completed ones. The `☑` button in a note's toolbar creates a task linked back to that note.
@@ -233,7 +234,7 @@ updated: 2026-07-05T04:35:21Z
 ...
 ```
 
-Files without frontmatter are adopted as-is (the title comes from the first heading, timestamps from the file, the folder from the directory it sits in), so you can drop an existing Markdown folder — subfolders and all — into `notes/` and it just works. The names `templates`, `backups`, and `attachments` are reserved for Portanote at the top level, and dot-directories are ignored. Trash is a flag, not a folder — "Delete forever" in the Trash view is what actually removes a file.
+Files without frontmatter are adopted as-is (the title comes from the first heading, timestamps from the file, the folder from the directory it sits in), so you can drop an existing Markdown folder — subfolders and all — into `notes/` and it just works. Files added while the app is running are indexed when you click the `⟳` sync button in the sidebar (or on the next start). The names `templates`, `backups`, and `attachments` are reserved for Portanote at the top level, and dot-directories are ignored. Trash is a flag, not a folder — "Delete forever" in the Trash view is what actually removes a file.
 
 > **Upgrading from ≤ v1.0?** The old flat layout (a `folder:` frontmatter field plus `.portanote-folders.json`) is migrated automatically on first start: each note's file moves into its folder's directory and the manifest is replaced by the directories themselves.
 
@@ -267,6 +268,7 @@ This repo also ships a `.mcp.json`, so Claude Code sessions started inside the p
 | `create_note` | New note with optional body, folder, tags |
 | `update_note` | Edit title/body/folder/tags/starred; `trashed: true` moves to trash |
 | `list_folders` / `list_tags` | Browse your organization scheme |
+| `rescan_notes` | Re-index the notes folder after files changed outside Portanote |
 | `list_tasks` / `add_task` / `update_task` | Work the standalone to-do list |
 
 **Safety notes:** the MCP surface can *trash* notes (recoverable in the UI) but deliberately has no permanent-delete tool. The endpoint follows the same bind rules as the UI (localhost-only by default; `-host subnet` extends it to your subnet), rejects browser cross-origin requests to block DNS-rebinding, and — like the rest of Portanote — has no authentication, so only expose it on networks you trust.

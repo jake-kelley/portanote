@@ -341,6 +341,64 @@ func TestDeleteFolderSparesStrayFiles(t *testing.T) {
 	}
 }
 
+// Rescan adopts files and folders created, edited, or removed outside the app.
+func TestRescanPicksUpExternalChanges(t *testing.T) {
+	s, dir := newTestStore(t)
+	keep, err := s.Create("Keeper")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// externally drop a folder with a plain note in it
+	if err := os.MkdirAll(filepath.Join(dir, "dropped"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "dropped", "external.md"),
+		[]byte("# External\n\nfrom the file explorer\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res := s.Rescan()
+	if res.Added != 1 || res.Changed != 0 || res.Removed != 0 || res.Total != 2 {
+		t.Fatalf("after add: %+v", res)
+	}
+	found := false
+	for _, it := range s.List() {
+		if it.Title == "External" && it.Folder == "dropped" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("external note not adopted: %+v", s.List())
+	}
+	if hits := s.Search("explorer", false); len(hits) != 1 {
+		t.Errorf("search index not rebuilt: %d hits", len(hits))
+	}
+
+	// externally rewrite the kept note's body
+	base := noteFilename(keep.Created, "Keeper")
+	edited := "---\nid: \"" + keep.ID + "\"\ntitle: \"Keeper\"\n---\n\nedited outside\n"
+	if err := os.WriteFile(filepath.Join(dir, base+".md"), []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res = s.Rescan()
+	if res.Added != 0 || res.Changed != 1 || res.Removed != 0 {
+		t.Fatalf("after edit: %+v", res)
+	}
+	n, err := s.Get(keep.ID)
+	if err != nil || n.Body != "edited outside\n" {
+		t.Fatalf("edited body not picked up: %+v, %v", n, err)
+	}
+
+	// externally delete the dropped note
+	if err := os.Remove(filepath.Join(dir, "dropped", "external.md")); err != nil {
+		t.Fatal(err)
+	}
+	res = s.Rescan()
+	if res.Added != 0 || res.Changed != 0 || res.Removed != 1 || res.Total != 1 {
+		t.Fatalf("after delete: %+v", res)
+	}
+}
+
 // Two hand-made files with the same basename in different folders both load.
 func TestDuplicateBasenamesAcrossFolders(t *testing.T) {
 	dir := t.TempDir()

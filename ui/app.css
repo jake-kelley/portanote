@@ -66,6 +66,9 @@ input,select,textarea{font:inherit;color:inherit;}
 .side-foot .badge.on{color:#1a8a53;border-color:#1a8a53;}
 .side-foot .ver{margin-left:auto;font-size:10.5px;color:var(--muted);}
 #themeBtn{font-size:14px;}
+#syncBtn{font-size:15px;}
+#syncBtn.spin{animation:pn-spin .8s linear infinite;}
+@keyframes pn-spin{to{transform:rotate(360deg);}}
 
 /* ---------------- list pane ---------------- */
 #listpane{width:320px;flex:none;display:flex;flex-direction:column;background:var(--bg);}

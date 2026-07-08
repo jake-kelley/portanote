@@ -18,7 +18,7 @@ import (
 	"runtime"
 )
 
-const version = "1.1.0"
+const version = "1.2.0"
 
 //go:embed all:ui
 var uiEmbed embed.FS

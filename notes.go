@@ -100,11 +100,26 @@ func NewStore(dir string) (*Store, error) {
 	if _, err := os.Stat(dir); err != nil {
 		return nil, err
 	}
-	filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || p == dir {
+	s.scanLocked()
+	s.migrateLegacyFolders()
+	s.migrateLegacyNotes()
+	s.seedTemplates()
+	s.loadSettings()
+	s.loadTasks()
+	return s, nil
+}
+
+// scanLocked rebuilds notes, search index, and folder list from the directory
+// tree. Caller holds s.mu (or is still single-threaded in NewStore).
+func (s *Store) scanLocked() {
+	s.notes = map[string]*Note{}
+	s.idx = NewIndex()
+	s.folders = nil
+	filepath.WalkDir(s.dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || p == s.dir {
 			return nil
 		}
-		rel, err := filepath.Rel(dir, p)
+		rel, err := filepath.Rel(s.dir, p)
 		if err != nil {
 			return nil
 		}
@@ -160,12 +175,45 @@ func NewStore(dir string) (*Store, error) {
 		s.idx.Put(n.ID, n.Title, n.Tags, n.Body)
 		return nil
 	})
+}
+
+// RescanResult summarizes what a rescan found relative to the previous index.
+type RescanResult struct {
+	Added   int `json:"added"`
+	Removed int `json:"removed"`
+	Changed int `json:"changed"`
+	Total   int `json:"total"`
+}
+
+// Rescan rebuilds the whole index from the directory tree on demand, adopting
+// files and folders created, edited, or deleted outside the app (file
+// explorer, git, another editor). IDs come from frontmatter, so surviving
+// notes keep their identity. Legacy-layout files dropped in (e.g. restored
+// from an old backup) are migrated exactly as at startup.
+func (s *Store) Rescan() RescanResult {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	old := s.notes
+	s.scanLocked()
 	s.migrateLegacyFolders()
 	s.migrateLegacyNotes()
-	s.seedTemplates()
-	s.loadSettings()
-	s.loadTasks()
-	return s, nil
+	res := RescanResult{Total: len(s.notes)}
+	for id, n := range s.notes {
+		o, ok := old[id]
+		switch {
+		case !ok:
+			res.Added++
+		case n.Body != o.Body || n.Title != o.Title || n.Folder != o.Folder ||
+			!slicesEqual(n.Tags, o.Tags) || n.Starred != o.Starred || n.Trashed != o.Trashed:
+			res.Changed++
+		}
+	}
+	for id := range old {
+		if _, ok := s.notes[id]; !ok {
+			res.Removed++
+		}
+	}
+	return res
 }
 
 // migrateLegacyFolders converts the old .portanote-folders.json manifest into

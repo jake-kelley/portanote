@@ -192,6 +192,11 @@ func newAPI(store *Store, uiFS fs.FS) http.Handler {
 		writeJSON(w, http.StatusOK, store.Tasks())
 	})
 
+	// re-index the notes directory: adopt files/folders changed outside the app
+	mux.HandleFunc("POST /api/rescan", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, store.Rescan())
+	})
+
 	mux.HandleFunc("GET /api/folders", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, store.Folders())
 	})
