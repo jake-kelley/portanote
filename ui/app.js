@@ -843,7 +843,59 @@ async function openSettings() {
   $("#setInterval").value = st.backupIntervalHours;
   $("#setKeep").value = st.backupKeep;
   renderBackupStatus(st);
+  $("#updateStatus").textContent = "Portanote v" + state.meta.version;
+  $("#updateApplyBtn").hidden = true;
+  $("#updateCheckBtn").disabled = false;
   $("#settingsOverlay").hidden = false;
+}
+
+async function checkForUpdates() {
+  const st = $("#updateStatus"), btn = $("#updateCheckBtn");
+  btn.disabled = true;
+  st.textContent = "Checking…";
+  $("#updateApplyBtn").hidden = true;
+  try {
+    const r = await fetch("/api/update/check");
+    const info = await r.json();
+    if (!r.ok) throw new Error(info.error || "check failed");
+    if (info.available) {
+      st.textContent = `${info.latest} is available (you have ${info.current}).`;
+      $("#updateApplyBtn").hidden = false;
+      $("#updateApplyBtn").disabled = false;
+    } else {
+      st.textContent = `You're up to date (${info.current}).`;
+    }
+  } catch (e) {
+    st.textContent = "Update check failed: " + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function installUpdate() {
+  const st = $("#updateStatus");
+  $("#updateApplyBtn").disabled = true;
+  $("#updateCheckBtn").disabled = true;
+  st.textContent = "Downloading and installing…";
+  try {
+    const r = await fetch("/api/update/apply", { method: "POST" });
+    const res = await r.json();
+    if (!r.ok) throw new Error(res.error || "update failed");
+    st.textContent = `Installed ${res.version} — restarting…`;
+    const before = state.meta.version;
+    for (let i = 0; i < 60; i++) {          // poll for the new instance, ~45 s
+      await new Promise((x) => setTimeout(x, 750));
+      try {
+        const meta = await fetch("/api/meta").then((x) => x.json());
+        if (meta.version !== before) { location.reload(); return; }
+      } catch { /* server is down mid-restart */ }
+    }
+    st.textContent = "The restart is taking a while — reload this page manually.";
+  } catch (e) {
+    st.textContent = "Update failed: " + e.message;
+    $("#updateApplyBtn").disabled = false;
+    $("#updateCheckBtn").disabled = false;
+  }
 }
 
 // refresh the local view after a bulk change
@@ -1390,6 +1442,8 @@ function bindEvents() {
   // settings modal
   $("#settingsBtn").addEventListener("click", openSettings);
   $("#syncBtn").addEventListener("click", syncNow);
+  $("#updateCheckBtn").addEventListener("click", checkForUpdates);
+  $("#updateApplyBtn").addEventListener("click", installUpdate);
   $("#settingsClose").addEventListener("click", () => { $("#settingsOverlay").hidden = true; });
   $("#settingsOverlay").addEventListener("click", (e) => {
     if (e.target.id === "settingsOverlay") $("#settingsOverlay").hidden = true;

@@ -16,9 +16,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"time"
 )
 
-const version = "1.3.0"
+// a var so test builds can override it with -ldflags "-X main.version=..."
+var version = "1.4.0"
 
 //go:embed all:ui
 var uiEmbed embed.FS
@@ -34,6 +36,13 @@ func main() {
 		noBrowser = flag.Bool("no-browser", false, "do not open the browser on start")
 	)
 	flag.Parse()
+
+	// leftovers from a previous self-update (best effort; the old binary may
+	// still be exiting, in which case the next start gets it)
+	if exe, err := os.Executable(); err == nil {
+		os.Remove(exe + ".old")
+		os.Remove(exe + ".new")
+	}
 
 	notesDir := *dir
 	if notesDir == "" {
@@ -116,6 +125,17 @@ func subnetGuard(next http.Handler, allowed *net.IPNet) http.Handler {
 
 // listen binds host on the requested port, walking upward if taken.
 func listen(host string, want int) (net.Listener, int) {
+	// after a self-update relaunch, wait briefly for the exiting parent to
+	// free its port instead of walking up — bookmarks keep working
+	if os.Getenv("PORTANOTE_RELAUNCH") != "" {
+		deadline := time.Now().Add(6 * time.Second)
+		for time.Now().Before(deadline) {
+			if ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", host, want)); err == nil {
+				return ln, want
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
 	for p := want; p < want+50; p++ {
 		ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", host, p))
 		if err == nil {

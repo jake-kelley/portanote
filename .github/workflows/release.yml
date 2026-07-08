@@ -24,10 +24,15 @@ jobs:
           GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o portanote-windows-amd64.exe .
           GOOS=darwin  GOARCH=arm64 go build -ldflags="-s -w" -o portanote-macos-arm64 .
 
+      # the in-app updater verifies downloads against this file
+      - name: Checksums
+        run: sha256sum portanote-windows-amd64.exe portanote-macos-arm64 > sha256sums.txt
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             portanote-windows-amd64.exe
             portanote-macos-arm64
+            sha256sums.txt
           generate_release_notes: true

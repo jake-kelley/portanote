@@ -197,6 +197,36 @@ func newAPI(store *Store, uiFS fs.FS) http.Handler {
 		writeJSON(w, http.StatusOK, store.Rescan())
 	})
 
+	// ---- self-update from GitHub Releases ----
+	mux.HandleFunc("GET /api/update/check", func(w http.ResponseWriter, r *http.Request) {
+		info, err := checkUpdate()
+		if err != nil {
+			writeErr(w, http.StatusBadGateway, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, info)
+	})
+	mux.HandleFunc("POST /api/update/apply", func(w http.ResponseWriter, r *http.Request) {
+		if !updateInFlight.CompareAndSwap(false, true) {
+			writeErr(w, http.StatusConflict, errors.New("an update is already in progress"))
+			return
+		}
+		exe, err := os.Executable()
+		if err != nil {
+			updateInFlight.Store(false)
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		tag, err := applyUpdate(exe)
+		if err != nil {
+			updateInFlight.Store(false)
+			writeErr(w, http.StatusBadGateway, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "restarting", "version": tag})
+		go relaunch(exe)
+	})
+
 	mux.HandleFunc("GET /api/folders", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, store.Folders())
 	})

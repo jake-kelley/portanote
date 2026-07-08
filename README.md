@@ -43,7 +43,7 @@ Grab the binary for your machine from the **[Releases page](https://github.com/j
 | **Windows** (64-bit) | [`portanote-windows-amd64.exe`](https://github.com/jake-kelley/portanote/releases/latest/download/portanote-windows-amd64.exe) |
 | **macOS** (Apple Silicon / M-series) | [`portanote-macos-arm64`](https://github.com/jake-kelley/portanote/releases/latest/download/portanote-macos-arm64) |
 
-> This repository is private, so those download links require you to be signed in to GitHub. If you'd rather download without signing in, make the repo public in Settings → General → Danger Zone.
+Once installed, Portanote keeps itself current: **⚙ Settings → Check for updates** fetches the latest release, verifies its checksum, swaps the binary in place, and restarts on the same port — notes, settings, and autostart launchers are untouched. Works on Windows and macOS. (If you make the repository private, set a `PORTANOTE_GITHUB_TOKEN` environment variable with a GitHub token so the updater can reach the releases API.)
 
 ### Windows
 
