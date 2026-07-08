@@ -61,8 +61,8 @@ input,select,textarea{font:inherit;color:inherit;}
 #folderlist a:hover .folder-x{opacity:1;}
 .folder-x:hover{background:var(--danger);color:#fff;}
 .folder-empty{padding:2px 16px 6px 20px;font-size:11.5px;color:var(--muted);font-style:italic;}
-.side-foot{border-top:1px solid var(--line);padding:8px 12px;display:flex;align-items:center;gap:8px;}
-.side-foot .badge{font-size:10.5px;border:1px solid var(--line);border-radius:10px;padding:1px 8px;color:var(--muted);}
+.side-foot{border-top:1px solid var(--line);padding:8px 10px;display:flex;align-items:center;gap:6px;}
+.side-foot .badge{font-size:10.5px;border:1px solid var(--line);border-radius:10px;padding:1px 6px;color:var(--muted);white-space:nowrap;}
 .side-foot .badge.on{color:#1a8a53;border-color:#1a8a53;}
 .side-foot .ver{margin-left:auto;font-size:10.5px;color:var(--muted);}
 #themeBtn{font-size:14px;}

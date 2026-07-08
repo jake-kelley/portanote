@@ -161,6 +161,10 @@ Portanote renders GitHub-Flavored Markdown. The `❔` toolbar button opens a ful
 
 Folders are `/`-separated paths (`Work/Runbooks/AWS`) shown as a collapsible tree. The `+` by the *Folders* header makes a new one (use `/` to nest); hover a folder for a `＋` (add subfolder) and `✕` (delete). Double-click to rename. Drag notes from the list onto a folder to move them. Deleting a folder makes its notes uncategorized — it never deletes notes.
 
+### Sync with disk (⟳)
+
+Since folders and notes are just directories and `.md` files, you can reorganize them with any tool you like — File Explorer, Finder, git, a script. Click the `⟳` button in the sidebar footer afterwards and Portanote re-indexes the whole notes folder, adopting everything you added, edited, moved, or deleted; the button flashes the number of changes it found. (A restart does the same thing.)
+
 ### Tags & suggestions
 
 Add tags in the tag row under a note's title. As you write, a **✨ Suggested** row proposes tags derived from the note's title and headers — click one to accept. Suggestions are computed locally; nothing leaves your machine.
