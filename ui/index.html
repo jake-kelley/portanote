@@ -149,6 +149,7 @@
         <div class="tb-group right">
           <button id="starBtn" title="Star">☆</button>
           <button id="taskFromNoteBtn" title="Create a to-do task from this note">☑</button>
+          <button id="claudeBtn" title="Ask Claude about this note" hidden>✳</button>
           <details id="exportMenu">
             <summary title="Export">⤓</summary>
             <div class="menu">
@@ -181,6 +182,29 @@
         <span id="saveState"></span>
       </footer>
     </div>
+
+    <aside id="claudePanel" hidden>
+      <div class="cl-head">
+        <span class="cl-title">✳ Ask Claude</span>
+        <button id="claudeClearBtn" title="Clear conversation">🗑</button>
+        <button id="claudeCloseBtn" title="Close panel">✕</button>
+      </div>
+      <div class="cl-hint">Each message starts a fresh conversation with the open note as context.</div>
+      <div id="claudeThread">
+        <div class="cl-empty">Ask about this note, or try a quick action.</div>
+      </div>
+      <div class="cl-quick" id="claudeQuick">
+        <button class="cl-chip" data-claude-quick="summarize" title="Summarize this note">Summarize</button>
+        <button class="cl-chip" data-claude-quick="improve" title="Suggest improvements to this note">Improve</button>
+        <button class="cl-chip" data-claude-quick="tasks" title="Add this note's action items to the To-Do list">Extract tasks</button>
+        <button class="cl-chip" data-claude-quick="tags" title="Suggest topic tags for this note">Suggest tags</button>
+      </div>
+      <div class="cl-composer">
+        <textarea id="claudeInput" rows="1" placeholder="Ask Claude…  (Enter to send)"></textarea>
+        <button id="claudeSendBtn" title="Send (Enter)">➤</button>
+        <button id="claudeStopBtn" title="Stop generating" hidden>■</button>
+      </div>
+    </aside>
   </section>
 
   <section id="boardpane" hidden></section>

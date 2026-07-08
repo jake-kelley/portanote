@@ -12,7 +12,7 @@
 
 - **Truly portable.** A ~10 MB binary you can run from a USB stick, a locked-down work laptop, or your home PC — nothing is installed and nothing touches the registry. Delete the folder and every trace is gone.
 - **Your data is just files.** Every note is a `.md` file with YAML frontmatter. Back it up, sync it, grep it, or edit it in any other editor. No database, no lock-in.
-- **Private by default.** It binds to `127.0.0.1` and talks to nothing on the internet. Nothing you write leaves your machine.
+- **Private by default.** It binds to `127.0.0.1` and talks to nothing on the internet unless you explicitly ask it to — checking for updates (GitHub) or using the optional Ask Claude panel (Anthropic).
 
 ## Features
 
@@ -31,6 +31,7 @@
 - **Automatic backups** — zips your whole notes folder on a schedule (default every 3 hours, keep the last 12), adjustable in the ⚙ settings with a "Back up now" button.
 - **Multi-select bulk actions** — Ctrl/Shift-click notes to move, star, or trash them together.
 - **Built-in MCP server** — AI tools (Claude Code, Claude Desktop, and any other MCP client) can search, read, create, and edit your notes over the [Model Context Protocol](https://modelcontextprotocol.io) at `/mcp`. Same localhost-only privacy as the UI. [Details below](#mcp-server-connect-ai-tools).
+- **Ask Claude panel** — if the [Claude Code CLI](https://claude.com/claude-code) is installed on your machine, a `✳` button in the note toolbar opens a chat panel about the open note: summarize, improve, extract action items straight into the To-Do list, suggest tags, or ask anything. Uses your existing Claude login; Claude only gets Portanote's own note tools (no shell or file access). [Details below](#ask-claude-built-in-ai-optional).
 
 ---
 
@@ -243,6 +244,19 @@ updated: 2026-07-05T04:35:21Z
 Files without frontmatter are adopted as-is (the title comes from the first heading, timestamps from the file, the folder from the directory it sits in), so you can drop an existing Markdown folder — subfolders and all — into `notes/` and it just works. Files added while the app is running are indexed when you click the `⟳` sync button in the sidebar (or on the next start). The names `templates`, `backups`, and `attachments` are reserved for Portanote at the top level, and dot-directories are ignored. Trash is a flag, not a folder — "Delete forever" in the Trash view is what actually removes a file.
 
 > **Upgrading from ≤ v1.0?** The old flat layout (a `folder:` frontmatter field plus `.portanote-folders.json`) is migrated automatically on first start: each note's file moves into its folder's directory and the manifest is replaced by the directories themselves.
+
+---
+
+## Ask Claude (built-in AI, optional)
+
+If the [Claude Code CLI](https://claude.com/claude-code) is installed and logged in on the machine running Portanote (`claude` on PATH), a `✳` button appears in the note toolbar. It opens a chat panel that knows which note you have open:
+
+- **Quick actions**: *Summarize*, *Improve* (suggestions only, never silent edits), *Extract tasks* (action items land in your To-Do list, linked back to the note), *Suggest tags*.
+- **Free-form**: ask anything about the note or your collection — Claude can search, read, create, and edit notes through Portanote's own MCP tools.
+
+How it works and what it can touch: each message spawns a fresh headless `claude` process that connects back to this Portanote instance over localhost. It is restricted to Portanote's note/task tools — no shell, no file access, no web. Anything it changes goes through the same store as the UI (so edits are indexed instantly, and "deleting" is only ever the recoverable trash). Your editor autosaves before each message and locks while Claude works; the note and To-Do list refresh when it finishes.
+
+Notes: messages (and the notes Claude reads to answer them) are sent to Anthropic through your own Claude account, and usage counts against your plan. Each message starts a fresh conversation. If the button doesn't appear, run `claude` once in a terminal to install/log in, then restart Portanote.
 
 ---
 

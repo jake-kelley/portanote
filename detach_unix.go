@@ -9,3 +9,6 @@ import "syscall"
 func detachAttr() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{Setsid: true}
 }
+
+// noWindowAttr only means something on Windows (console suppression).
+func noWindowAttr() *syscall.SysProcAttr { return nil }

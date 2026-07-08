@@ -12,3 +12,9 @@ func detachAttr() *syscall.SysProcAttr {
 	)
 	return &syscall.SysProcAttr{CreationFlags: detachedProcess | createNewProcessGroup}
 }
+
+// noWindowAttr keeps a spawned child (the claude CLI) from flashing a console window.
+func noWindowAttr() *syscall.SysProcAttr {
+	const createNoWindow = 0x08000000
+	return &syscall.SysProcAttr{CreationFlags: createNoWindow}
+}

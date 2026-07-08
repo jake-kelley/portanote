@@ -86,6 +86,8 @@ func main() {
 	}
 
 	ln, actualPort := listen(bindHost, *port)
+	// the spawned claude CLI must call back into this instance's real port
+	claudeMCPURL = fmt.Sprintf("http://127.0.0.1:%d/mcp", actualPort)
 	localURL := fmt.Sprintf("http://127.0.0.1:%d", actualPort)
 	log.Printf("serving at %s  (Ctrl+C to quit)", localURL)
 	log.Printf("MCP endpoint at %s/mcp  (Streamable HTTP)", localURL)

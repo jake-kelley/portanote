@@ -33,6 +33,7 @@ func newAPI(store *Store, uiFS fs.FS) http.Handler {
 			"pandoc":  pandoc,
 			"engine":  engine,
 			"eisvogel": pandoc != "" && engine != "",
+			"claude":  claudeAvailable(),
 		})
 	})
 
@@ -226,6 +227,10 @@ func newAPI(store *Store, uiFS fs.FS) http.Handler {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "restarting", "version": tag})
 		go relaunch(exe)
 	})
+
+	// ---- embedded Claude Code chat (spawns the local claude CLI) ----
+	mux.HandleFunc("POST /api/claude/chat", claudeChatHandler(store))
+	mux.HandleFunc("POST /api/claude/stop", claudeStopHandler)
 
 	mux.HandleFunc("GET /api/folders", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, store.Folders())

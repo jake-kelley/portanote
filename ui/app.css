@@ -103,7 +103,7 @@ input,select,textarea{font:inherit;color:inherit;}
 #searchScope{display:block;width:100%;margin-top:5px;padding:6px 12px;text-align:left;
   font-size:11.5px;border:1px solid var(--line);border-radius:8px;background:var(--bg2);
   color:var(--muted);cursor:pointer;}
-#searchScope:hover{border-color:var(--accent);color:var(--text);}
+#searchScope:hover{border-color:var(--accent);color:var(--ink);}
 #notelist{flex:1;overflow-y:auto;}
 .note-item{display:flex;gap:9px;align-items:flex-start;padding:12px 14px 10px 11px;
   border-bottom:1px solid var(--line);cursor:pointer;border-left:3px solid transparent;}
@@ -138,13 +138,14 @@ mark{background:var(--mark);color:inherit;border-radius:2px;padding:0 1px;}
 .list-empty{padding:40px 20px;text-align:center;color:var(--muted);font-size:13px;}
 
 /* ---------------- editor ---------------- */
-#editor{flex:1;display:flex;flex-direction:column;min-width:0;background:var(--bg);}
+/* row: the editor column (#editorMain) + the optional Ask Claude drawer */
+#editor{flex:1;display:flex;flex-direction:row;min-width:0;background:var(--bg);}
 #emptyState{margin:auto;text-align:center;color:var(--muted);}
 .empty-icon{font-size:44px;margin-bottom:8px;}
 .hints{font-size:12px;}
 kbd{background:var(--chip);border:1px solid var(--chip-line);border-bottom-width:2px;
   border-radius:4px;padding:0 5px;font-size:11px;font-family:inherit;}
-#editorMain{flex:1;display:flex;flex-direction:column;min-height:0;}
+#editorMain{flex:1;display:flex;flex-direction:column;min-height:0;min-width:0;}
 #trashBanner{background:#fdeeec;color:#8c2f33;padding:8px 20px;font-size:13px;display:flex;
   align-items:center;gap:10px;}
 body.dark #trashBanner{background:#3a1d1f;color:#e8b4b6;}
@@ -320,3 +321,50 @@ table.cheat code{background:var(--chip);border:1px solid var(--chip-line);border
 .mermaid-error{border-left:3px solid var(--danger);background:#fdeeec;color:#8c2f33;
   padding:8px 12px;border-radius:0 6px 6px 0;font-size:12.5px;font-family:Consolas,monospace;}
 body.dark .mermaid-error{background:#3a1d1f;color:#e8b4b6;}
+
+/* ---------------- Ask Claude panel ---------------- */
+#claudeBtn.on{background:var(--accent-soft);color:var(--accent);}
+#claudePanel{width:320px;flex:none;display:flex;flex-direction:column;min-height:0;
+  border-left:1px solid var(--line);background:var(--bg2);}
+.cl-head{display:flex;align-items:center;gap:4px;padding:10px 12px 6px;}
+.cl-title{font-weight:700;font-size:13px;flex:1;}
+.cl-head button{color:var(--muted);font-size:12px;width:24px;height:24px;border-radius:6px;}
+.cl-head button:hover{background:var(--bg3);color:var(--ink);}
+.cl-hint{font-size:11px;color:var(--muted);padding:0 12px 8px;border-bottom:1px solid var(--line);}
+#claudeThread{flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px;}
+.cl-empty{color:var(--muted);font-size:12.5px;text-align:center;margin:auto;padding:20px 8px;}
+.cl-msg{font-size:12.5px;line-height:1.5;flex:none;}
+.cl-user{align-self:flex-end;max-width:85%;background:var(--accent-soft);border-radius:8px;
+  padding:6px 10px;white-space:pre-wrap;overflow-wrap:break-word;}
+.cl-assistant{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 10px;
+  overflow-wrap:break-word;min-width:0;}
+.cl-assistant.markdown{font-size:12.5px;line-height:1.55;}
+.cl-assistant > :first-child{margin-top:0;}
+.cl-assistant > :last-child{margin-bottom:0;}
+.cl-assistant pre code{font-size:11px;}
+.cl-error{border-left:3px solid var(--danger);background:#fdeeec;color:#8c2f33;
+  border-radius:0 8px 8px 0;padding:6px 10px;font-size:11.5px;
+  font-family:Consolas,Menlo,monospace;white-space:pre-wrap;overflow-wrap:break-word;}
+body.dark .cl-error{background:#3a1d1f;color:#e8b4b6;}
+.cl-system{color:var(--muted);font-size:11.5px;font-style:italic;text-align:center;}
+.cl-cursor{display:inline-block;width:7px;height:13px;background:var(--accent);border-radius:2px;
+  vertical-align:text-bottom;animation:cl-blink 1s steps(2,start) infinite;}
+@keyframes cl-blink{50%{opacity:0;}}
+.cl-quick{display:flex;flex-wrap:wrap;gap:5px;padding:8px 12px 0;border-top:1px solid var(--line);}
+.cl-chip{font-size:11.5px;background:var(--chip);border:1px solid var(--chip-line);border-radius:12px;
+  padding:2px 9px;color:var(--muted);cursor:pointer;}
+.cl-chip:hover:not(:disabled){border-color:var(--accent);color:var(--accent);background:var(--accent-soft);}
+.cl-chip:disabled{opacity:.5;cursor:not-allowed;}
+.cl-composer{display:flex;align-items:flex-end;gap:6px;padding:8px 12px 12px;}
+#claudeInput{flex:1;resize:none;border:1px solid var(--line);border-radius:8px;background:var(--bg);
+  color:var(--ink);padding:7px 10px;font-size:12.5px;line-height:1.4;outline:none;
+  max-height:72px;overflow-y:auto;min-width:0;}
+#claudeInput:focus{border-color:var(--accent);}
+#claudeInput:disabled{opacity:.55;}
+#claudeSendBtn,#claudeStopBtn{width:32px;height:32px;border-radius:8px;background:var(--accent);
+  color:#fff;font-size:13px;flex:none;}
+#claudeSendBtn:hover{filter:brightness(1.1);}
+#claudeStopBtn{background:var(--danger);}
+#claudeStopBtn:disabled{opacity:.6;cursor:not-allowed;}
+/* the note inputs are frozen while Claude may be editing the note server-side */
+#mdtext:disabled,#title:disabled{opacity:.6;}

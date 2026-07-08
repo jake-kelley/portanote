@@ -28,6 +28,10 @@ const state = {
   saveTimer: null,
   searchTimer: null,
   previewTimer: null,
+  claudeOpen: localStorage.getItem("pn-claude-open") === "1",  // Ask Claude drawer
+  claudeStreaming: false,   // a turn is in flight
+  claudeStopRequested: false,
+  claudeAtBottom: true,     // auto-scroll the thread unless the user scrolled up
 };
 
 /* ---------------------------------------------------------------- init */
@@ -423,6 +427,7 @@ function renderEditor() {
   const n = state.current;
   $("#emptyState").style.display = n ? "none" : "";
   $("#editorMain").hidden = !n;
+  renderClaudeUI();
   if (!n) return;
 
   $("#trashBanner").hidden = !n.trashed;
@@ -1157,6 +1162,199 @@ async function exportEisvogel() {
   }
 }
 
+/* ---------------------------------------------------------------- ask claude */
+/* Right-hand drawer that talks to the local Claude Code CLI through the
+   /api/claude endpoints. Phase 1: each message is an independent invocation
+   (no memory of prior messages); the thread is kept client-side only. */
+
+// canned prompts for the quick-action chips
+const CLAUDE_QUICK = {
+  summarize: "Summarize this note in a few bullet points.",
+  improve: "Suggest concrete improvements to this note's writing and structure. Do not edit the note; list the suggestions.",
+  tasks: "Extract any action items from this note and add each as a to-do task via add_task, linked to this note. Reply with the list of tasks you added.",
+  tags: "Suggest 3-5 topic tags for this note. Do not apply them; just list them.",
+};
+const CLAUDE_EMPTY = `<div class="cl-empty">Ask about this note, or try a quick action.</div>`;
+
+// show/hide the toolbar button and the drawer; when the backend reports
+// claude:false (CLI not installed) no trace of the feature is visible
+function renderClaudeUI() {
+  const on = !!state.meta.claude;
+  $("#claudeBtn").hidden = !on;
+  $("#claudeBtn").classList.toggle("on", on && state.claudeOpen);
+  $("#claudePanel").hidden = !(on && state.claudeOpen && state.current);
+}
+
+function claudeTogglePanel() {
+  state.claudeOpen = !state.claudeOpen;
+  localStorage.setItem("pn-claude-open", state.claudeOpen ? "1" : "0");
+  renderClaudeUI();
+  if (!$("#claudePanel").hidden) $("#claudeInput").focus();
+}
+
+// empty the visual thread (client-side only)
+function claudeClearThread() {
+  if (state.claudeStreaming) return;
+  $("#claudeThread").innerHTML = CLAUDE_EMPTY;
+}
+
+// append a message to the thread and return its element (html must be safe)
+function claudeAppendMessage(cls, html) {
+  const thread = $("#claudeThread");
+  thread.querySelector(".cl-empty")?.remove();
+  const div = document.createElement("div");
+  div.className = "cl-msg " + cls;
+  div.innerHTML = html;
+  thread.appendChild(div);
+  claudeScrollToBottom();
+  return div;
+}
+
+function claudeScrollToBottom(force = false) {
+  const t = $("#claudeThread");
+  if (force || state.claudeAtBottom) t.scrollTop = t.scrollHeight;
+}
+
+// while a turn streams: composer disabled, Send becomes Stop, and the note
+// inputs are frozen because Claude may edit the note server-side mid-turn
+function claudeSetStreaming(on) {
+  state.claudeStreaming = on;
+  $("#claudeInput").disabled = on;
+  $("#claudeSendBtn").hidden = on;
+  $("#claudeStopBtn").hidden = !on;
+  $("#claudeStopBtn").disabled = false;
+  $$(".cl-chip").forEach((b) => (b.disabled = on));
+  $("#mdtext").disabled = on;
+  $("#title").disabled = on;
+}
+
+async function claudeStop() {
+  state.claudeStopRequested = true;
+  $("#claudeStopBtn").disabled = true;
+  try { await fetch("/api/claude/stop", { method: "POST" }); } catch { /* stream ends either way */ }
+}
+
+// keep the composer between one and ~three rows tall
+function claudeGrowComposer() {
+  const ta = $("#claudeInput");
+  ta.style.height = "auto";
+  ta.style.height = Math.min(ta.scrollHeight, 72) + "px";
+}
+
+function claudeSendFromInput() {
+  const ta = $("#claudeInput");
+  const v = ta.value.trim();
+  if (!v || state.claudeStreaming) return;
+  ta.value = "";
+  claudeGrowComposer();
+  claudeSend(v);
+}
+
+// send one message and stream the reply (SSE over fetch)
+async function claudeSend(message) {
+  message = (message || "").trim();
+  if (!message || state.claudeStreaming || !state.meta.claude) return;
+  if (state.dirty) await saveNow();               // Claude reads the saved state
+  const noteId = state.current ? state.current.id : "";
+
+  state.claudeStopRequested = false;
+  state.claudeAtBottom = true;
+  claudeAppendMessage("cl-user", esc(message));
+  const live = claudeAppendMessage("cl-assistant markdown", `<span class="cl-cursor"></span>`);
+  claudeSetStreaming(true);
+
+  let text = "", sawDone = false, sawError = false;
+  // finalize whatever has streamed so far (drops the cursor)
+  const finalize = () => {
+    if (text) { live.innerHTML = renderMarkdown(text); highlightBlocks(live); }
+    else live.remove();
+  };
+  // one SSE frame: `data: <json>` lines separated from the next frame by \n\n
+  const handleFrame = (frame) => {
+    for (const line of frame.split("\n")) {
+      if (!line.startsWith("data:")) continue;
+      let ev;
+      try { ev = JSON.parse(line.slice(5)); } catch { continue; }
+      if (ev.type === "delta") {
+        text += ev.text || "";
+        live.innerHTML = renderMarkdown(text) + `<span class="cl-cursor"></span>`;
+        claudeScrollToBottom();
+      } else if (ev.type === "done") {
+        sawDone = true;
+      } else if (ev.type === "error") {
+        sawError = true;
+        finalize();
+        if (state.claudeStopRequested || /^stopped$/i.test((ev.error || "").trim())) {
+          claudeAppendMessage("cl-system", "Stopped.");
+        } else {
+          claudeAppendMessage("cl-error", esc(ev.error || "Unknown error"));
+        }
+      }
+    }
+  };
+
+  try {
+    const r = await fetch("/api/claude/chat", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ noteId, message }),
+    });
+    if (!r.ok) {                                  // plain JSON: 409 turn running, 503 not installed
+      const err = await r.json().catch(() => ({}));
+      finalize();
+      claudeAppendMessage("cl-error", esc(err.error || "Request failed (" + r.status + ")"));
+      return;
+    }
+
+    // frames may split across chunks — buffer and split on the double newline
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n\n")) >= 0) { handleFrame(buf.slice(0, i)); buf = buf.slice(i + 2); }
+    }
+    buf += dec.decode();
+    if (buf.trim()) handleFrame(buf);
+
+    if (!sawError) {
+      if (sawDone) finalize();
+      else {                                      // stream closed without done/error
+        finalize();
+        if (state.claudeStopRequested) claudeAppendMessage("cl-system", "Stopped.");
+        else claudeAppendMessage("cl-error", "The response stream ended unexpectedly.");
+      }
+    }
+    // Claude may have edited the note or added tasks — pull everything fresh
+    if ((sawDone && !sawError) || state.claudeStopRequested) await claudeRefreshAfterTurn(noteId);
+  } catch (e) {
+    finalize();
+    claudeAppendMessage("cl-error", esc(String((e && e.message) || e)));
+  } finally {
+    claudeSetStreaming(false);
+  }
+}
+
+// after a turn: re-fetch the open note, the tasks, and the note list so
+// server-side edits and extracted tasks appear immediately
+async function claudeRefreshAfterTurn(noteId) {
+  try {
+    const [noteRes, tasks] = await Promise.all([
+      noteId ? fetch("/api/notes/" + encodeURIComponent(noteId)) : null,
+      fetch("/api/tasks").then((r) => r.json()),
+    ]);
+    state.tasks = tasks || [];
+    if (noteRes && noteRes.ok && state.current && state.current.id === noteId) {
+      state.current = await noteRes.json();
+      renderEditor();
+      refreshBacklinks();
+    }
+    await reloadNotes();                          // notes + folders, then renderAll()
+  } catch { /* non-fatal — the reply already rendered */ }
+}
+
 /* ---------------------------------------------------------------- events */
 
 function onBodyInput() {
@@ -1427,6 +1625,32 @@ function bindEvents() {
   $("#cheatClose").addEventListener("click", () => { $("#cheatOverlay").hidden = true; });
   $("#cheatOverlay").addEventListener("click", (e) => {
     if (e.target.id === "cheatOverlay") $("#cheatOverlay").hidden = true;
+  });
+
+  // Ask Claude panel
+  $("#claudeBtn").addEventListener("click", claudeTogglePanel);
+  $("#claudeCloseBtn").addEventListener("click", claudeTogglePanel);
+  $("#claudeClearBtn").addEventListener("click", claudeClearThread);
+  $("#claudeSendBtn").addEventListener("click", claudeSendFromInput);
+  $("#claudeStopBtn").addEventListener("click", claudeStop);
+  $("#claudeQuick").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-claude-quick]");
+    if (b) claudeSend(CLAUDE_QUICK[b.dataset.claudeQuick]);
+  });
+  $("#claudeInput").addEventListener("input", claudeGrowComposer);
+  $("#claudeInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); claudeSendFromInput(); }
+    else if (e.key === "Escape") e.target.blur();
+  });
+  // auto-scroll only while the user is at the bottom of the thread
+  $("#claudeThread").addEventListener("scroll", (e) => {
+    const t = e.target;
+    state.claudeAtBottom = t.scrollHeight - t.scrollTop - t.clientHeight < 40;
+  });
+  // [[wiki links]] in Claude replies navigate like the preview's
+  $("#claudeThread").addEventListener("click", (e) => {
+    const w = e.target.closest(".wikilink");
+    if (w) { e.preventDefault(); openWikilink(w.dataset.wikilink); }
   });
 
   // close popover menus on an outside click
