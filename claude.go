@@ -33,14 +33,19 @@ var claudeLook struct {
 	path string
 }
 
-// claudePath returns the claude CLI's location ("" if not installed). A var
-// so tests can stub availability; the real lookup runs once. PATH is tried
-// first, then the usual install locations — a launchd-started process (macOS
-// autostart, Finder) gets a minimal PATH that lacks ~/.local/bin and Homebrew.
-var claudePath = func() string {
+// detectedClaudeExe is the claude binary found at launch, computed once. PATH
+// is tried first, then the usual install locations — a launchd-started process
+// (macOS autostart, Finder) gets a minimal PATH that lacks ~/.local/bin and
+// Homebrew.
+func detectedClaudeExe() string {
 	claudeLook.once.Do(func() { claudeLook.path = findClaude() })
 	return claudeLook.path
 }
+
+// claudePath returns the claude binary the chat should spawn: the user's
+// configured override if it exists, else the auto-detected one. A var so tests
+// can stub availability.
+var claudePath = func() string { return resolveClaudeExe() }
 
 func findClaude() string {
 	if p, err := exec.LookPath("claude"); err == nil {
@@ -141,9 +146,11 @@ func claudeChatHandler(store *Store) http.HandlerFunc {
 			}
 		}
 
+		start := time.Now()
 		err := runClaude(r.Context(), store.dir, req.Message, claudeContextPrompt(note, req.Selection), func(text string) {
 			emit(sseEvent{Type: "delta", Text: text})
 		})
+		logClaudeTurn(note, req.Selection, req.Message, start, err)
 		if err != nil {
 			emit(sseEvent{Type: "error", Error: err.Error()})
 			return
@@ -216,7 +223,7 @@ var runClaude = func(ctx context.Context, dir, message, sysPrompt string, emit f
 	defer cancel()
 	// inline JSON is a single argv entry — no shell, no quoting issues
 	mcpCfg := fmt.Sprintf(`{"mcpServers":{"portanote":{"type":"http","url":%q}}}`, claudeMCPURL)
-	cmd := exec.CommandContext(ctx, claudePath(),
+	args := []string{
 		"-p", message,
 		"--output-format", "stream-json", "--verbose", "--include-partial-messages",
 		"--mcp-config", mcpCfg,
@@ -225,7 +232,11 @@ var runClaude = func(ctx context.Context, dir, message, sysPrompt string, emit f
 		"--disallowedTools", "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch",
 		"--permission-mode", "dontAsk", // blocked tools fail fast instead of prompting
 		"--append-system-prompt", sysPrompt,
-	)
+	}
+	if s := claudeSettingsArg(); s != "" { // only when the user set a custom settings file
+		args = append(args, "--settings", s)
+	}
+	cmd := exec.CommandContext(ctx, claudePath(), args...)
 	cmd.Dir = dir
 	cmd.Stdin = bytes.NewReader(nil) // an open stdin makes the CLI sit waiting on it
 	cmd.SysProcAttr = noWindowAttr()

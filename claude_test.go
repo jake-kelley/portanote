@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 )
 
 // fixtures modeled on real claude 2.1.204 stream-json output (trimmed)
@@ -331,5 +332,143 @@ func TestFindClaudeFallsBackToLocalBin(t *testing.T) {
 	}
 	if got := findClaude(); got != want {
 		t.Errorf("findClaude() = %q, want %q", got, want)
+	}
+}
+
+// ---------------------------------------------------------------- config + log
+
+func TestClaudeExeResolution(t *testing.T) {
+	loadClaudeConfig(t.TempDir())
+	// an override that exists wins
+	exe := filepath.Join(t.TempDir(), "myclaude")
+	if err := os.WriteFile(exe, []byte("stub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	claudeCfg.mu.Lock()
+	claudeCfg.data.Exe = exe
+	claudeCfg.mu.Unlock()
+	if got := resolveClaudeExe(); got != exe {
+		t.Errorf("override not used: got %q, want %q", got, exe)
+	}
+	// a missing override falls back to detection (self-heals a stale synced path)
+	claudeCfg.mu.Lock()
+	claudeCfg.data.Exe = filepath.Join(t.TempDir(), "gone")
+	claudeCfg.mu.Unlock()
+	if got := resolveClaudeExe(); got != detectedClaudeExe() {
+		t.Errorf("missing override should fall back to detected, got %q", got)
+	}
+}
+
+func TestClaudeSettingsArgOnlyWhenExplicit(t *testing.T) {
+	loadClaudeConfig(t.TempDir())
+	if got := claudeSettingsArg(); got != "" {
+		t.Errorf("no override should pass no --settings, got %q", got)
+	}
+	sf := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(sf, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	claudeCfg.mu.Lock()
+	claudeCfg.data.SettingsFile = sf
+	claudeCfg.mu.Unlock()
+	if got := claudeSettingsArg(); got != sf {
+		t.Errorf("explicit settings file not used: got %q, want %q", got, sf)
+	}
+	// a missing settings override passes nothing rather than a bad path
+	claudeCfg.mu.Lock()
+	claudeCfg.data.SettingsFile = filepath.Join(t.TempDir(), "nope.json")
+	claudeCfg.mu.Unlock()
+	if got := claudeSettingsArg(); got != "" {
+		t.Errorf("missing settings override should pass no flag, got %q", got)
+	}
+}
+
+func TestClaudeConfigHandlerRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	loadClaudeConfig(dir)
+	h := newAPI(newClaudeTestStore(t), fstest.MapFS{})
+
+	exe := filepath.Join(t.TempDir(), "claude-custom")
+	os.WriteFile(exe, []byte("x"), 0o755)
+	body := `{"exe":` + strconv.Quote(exe) + `,"settingsFile":""}`
+	req := httptest.NewRequest("PUT", "/api/claude/config", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT status %d: %s", rec.Code, rec.Body.String())
+	}
+	var got claudeConfigResp
+	json.Unmarshal(rec.Body.Bytes(), &got)
+	if got.Exe != exe || !got.Available || got.EffectiveExe != exe {
+		t.Fatalf("config after PUT = %+v", got)
+	}
+	// persisted to the notes dir
+	if _, err := os.Stat(filepath.Join(dir, ".portanote-claude.json")); err != nil {
+		t.Errorf("config not persisted: %v", err)
+	}
+	// GET returns the same
+	req = httptest.NewRequest("GET", "/api/claude/config", nil)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	json.Unmarshal(rec.Body.Bytes(), &got)
+	if got.Exe != exe {
+		t.Errorf("GET after PUT lost the override: %+v", got)
+	}
+}
+
+func TestClaudeLogCapAndOrder(t *testing.T) {
+	dir := t.TempDir()
+	loadClaudeConfig(dir)
+	for i := 0; i < claudeLogMax+5; i++ {
+		appendClaudeLog(claudeLogEntry{Time: time.Now(), Prompt: "p" + strconv.Itoa(i), OK: true})
+	}
+	h := newAPI(newClaudeTestStore(t), fstest.MapFS{})
+	req := httptest.NewRequest("GET", "/api/claude/logs", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	var logs []claudeLogEntry
+	json.Unmarshal(rec.Body.Bytes(), &logs)
+	if len(logs) != claudeLogMax {
+		t.Fatalf("log not capped: %d entries", len(logs))
+	}
+	if logs[0].Prompt != "p"+strconv.Itoa(claudeLogMax+4) {
+		t.Errorf("newest not first: %q", logs[0].Prompt)
+	}
+	// persisted and reloadable
+	loadClaudeLog(dir)
+	if len(claudeLog.entries) != claudeLogMax {
+		t.Errorf("log not persisted: %d after reload", len(claudeLog.entries))
+	}
+}
+
+func TestClaudeChatRecordsLog(t *testing.T) {
+	dir := t.TempDir()
+	loadClaudeConfig(dir)
+	stubClaude(t, "claude-fake", func(ctx context.Context, d, msg, sys string, emit func(string)) error {
+		if msg == "boom" {
+			return errors.New("kaboom")
+		}
+		emit("ok")
+		return nil
+	})
+	store := newClaudeTestStore(t)
+	h := newAPI(store, fstest.MapFS{})
+
+	postChat(t, h, `{"message":"hello there"}`)
+	postChat(t, h, `{"message":"boom"}`)
+
+	req := httptest.NewRequest("GET", "/api/claude/logs", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	var logs []claudeLogEntry
+	json.Unmarshal(rec.Body.Bytes(), &logs)
+	if len(logs) < 2 {
+		t.Fatalf("expected 2 log entries, got %d", len(logs))
+	}
+	if logs[0].Prompt != "boom" || logs[0].OK || logs[0].Error != "kaboom" {
+		t.Errorf("error turn not logged right: %+v", logs[0])
+	}
+	if logs[1].Prompt != "hello there" || !logs[1].OK {
+		t.Errorf("ok turn not logged right: %+v", logs[1])
 	}
 }

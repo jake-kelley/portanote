@@ -237,6 +237,19 @@ table.cheat code{background:var(--chip);border:1px solid var(--chip-line);border
 .settings-desc{color:var(--muted);font-size:12.5px;margin:0 0 12px;}
 .setting-row{display:flex;align-items:center;gap:8px;font-size:13.5px;margin:8px 0;}
 .setting-row input{width:64px;border:1px solid var(--line);border-radius:6px;padding:5px 8px;background:var(--bg2);color:var(--ink);}
+.setting-row.col{flex-direction:column;align-items:stretch;gap:5px;}
+.setting-row.col input{width:100%;font-size:12.5px;}
+.setting-row .mhint{font-size:10.5px;color:var(--muted);font-weight:400;}
+.cl-log{max-height:190px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;margin-top:4px;}
+.cl-log-empty{color:var(--muted);font-size:12px;font-style:italic;padding:10px 12px;}
+.cl-log-row{padding:7px 11px;border-bottom:1px solid var(--line);font-size:12px;}
+.cl-log-row:last-child{border-bottom:none;}
+.cl-log-row.err{border-left:3px solid var(--danger);padding-left:8px;}
+.cl-log-top{display:flex;gap:8px;align-items:baseline;}
+.cl-log-time{color:var(--muted);font-size:10.5px;white-space:nowrap;flex:none;}
+.cl-log-prompt{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.cl-log-meta{color:var(--muted);font-size:10.5px;margin-top:2px;}
+.cl-log-err{color:var(--danger);font-size:11px;margin-top:3px;white-space:pre-wrap;overflow-wrap:break-word;}
 .settings-status{font-size:12px;color:var(--muted);margin:14px 0 2px;padding-top:12px;border-top:1px solid var(--line);}
 .settings-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px;}
 .btn-primary{background:var(--accent);color:#fff;border-radius:7px;padding:8px 16px;font-weight:700;font-size:13px;}

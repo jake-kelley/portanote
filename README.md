@@ -249,7 +249,7 @@ Files without frontmatter are adopted as-is (the title comes from the first head
 
 ## Ask Claude (built-in AI, optional)
 
-If the [Claude Code CLI](https://claude.com/claude-code) is installed and logged in on the machine running Portanote (`claude` on PATH), a `✳` button appears in the note toolbar. It opens a chat panel that knows which note you have open:
+If the [Claude Code CLI](https://claude.com/claude-code) is installed and logged in on the machine running Portanote, a `✳` button appears in the note toolbar. It opens a chat panel that knows which note you have open:
 
 - **Quick actions**: *Summarize*, *Improve* (suggestions only, never silent edits), *Extract tasks* (action items land in your To-Do list, linked back to the note), *Suggest tags*.
 - **Free-form**: ask anything about the note or your collection — Claude can search, read, create, and edit notes through Portanote's own MCP tools.
@@ -257,7 +257,9 @@ If the [Claude Code CLI](https://claude.com/claude-code) is installed and logged
 
 How it works and what it can touch: each message spawns a fresh headless `claude` process that connects back to this Portanote instance over localhost. It is restricted to Portanote's note/task tools — no shell, no file access, no web. Anything it changes goes through the same store as the UI (so edits are indexed instantly, and "deleting" is only ever the recoverable trash). Your editor autosaves before each message and locks while Claude works; the note and To-Do list refresh when it finishes.
 
-Notes: messages (and the notes Claude reads to answer them) are sent to Anthropic through your own Claude account, and usage counts against your plan. Each message starts a fresh conversation. If the button doesn't appear, run `claude` once in a terminal to install/log in, then restart Portanote.
+Notes: messages (and the notes Claude reads to answer them) are sent to Anthropic through your own Claude account, and usage counts against your plan. Each message starts a fresh conversation.
+
+**Settings & logs** (⚙ Settings → *Ask Claude*): Portanote auto-detects the `claude` executable and settings file at launch — checking your `PATH` first, then the usual install locations (`~/.local/bin`, Homebrew, …) so a background-launched instance on macOS still finds it. The settings fields are pre-filled with what was detected; point them at a specific binary or `--settings` file if you'd rather, or clear a field to go back to auto-detect. Below that, an activity log lists recent prompts and any errors (the exact CLI error is captured, so a "not logged in" or misconfiguration shows up there). If the button doesn't appear, open that section to see what was detected — or run `claude` once in a terminal to log in, then restart Portanote.
 
 ---
 

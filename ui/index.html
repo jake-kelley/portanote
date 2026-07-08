@@ -322,6 +322,26 @@
         <button id="updateCheckBtn" class="btn-secondary">Check for updates</button>
         <button id="updateApplyBtn" class="btn-primary" hidden>Install &amp; restart</button>
       </div>
+
+      <h3>Ask Claude</h3>
+      <p class="settings-desc">Which <code>claude</code> executable and settings file the Ask Claude panel uses. Pre-filled with what was detected at launch; clear a field to fall back to auto-detect.</p>
+      <label class="setting-row col">Executable
+        <input id="setClaudeExe" type="text" spellcheck="false" autocomplete="off" placeholder="auto-detect">
+      </label>
+      <label class="setting-row col">Settings file <span class="mhint">--settings</span>
+        <input id="setClaudeSettings" type="text" spellcheck="false" autocomplete="off" placeholder="claude default">
+      </label>
+      <div class="settings-status" id="claudeCfgStatus"></div>
+      <div class="settings-actions">
+        <button id="claudeCfgSave" class="btn-primary">Save Claude settings</button>
+      </div>
+
+      <h3>Claude activity log</h3>
+      <p class="settings-desc">Recent Ask Claude prompts and any errors, newest first.</p>
+      <div id="claudeLogList" class="cl-log"></div>
+      <div class="settings-actions">
+        <button id="claudeLogClear" class="btn-secondary">Clear log</button>
+      </div>
     </div>
   </div>
 </div>

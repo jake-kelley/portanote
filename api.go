@@ -231,6 +231,10 @@ func newAPI(store *Store, uiFS fs.FS) http.Handler {
 	// ---- embedded Claude Code chat (spawns the local claude CLI) ----
 	mux.HandleFunc("POST /api/claude/chat", claudeChatHandler(store))
 	mux.HandleFunc("POST /api/claude/stop", claudeStopHandler)
+	mux.HandleFunc("GET /api/claude/config", claudeConfigHandler)
+	mux.HandleFunc("PUT /api/claude/config", claudeConfigHandler)
+	mux.HandleFunc("GET /api/claude/logs", claudeLogsHandler)
+	mux.HandleFunc("POST /api/claude/logs/clear", claudeLogsClearHandler)
 
 	mux.HandleFunc("GET /api/folders", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, store.Folders())

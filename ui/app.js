@@ -851,7 +851,80 @@ async function openSettings() {
   $("#updateStatus").textContent = "Portanote v" + state.meta.version;
   $("#updateApplyBtn").hidden = true;
   $("#updateCheckBtn").disabled = false;
+  loadClaudeConfigUI();
+  renderClaudeLog();
   $("#settingsOverlay").hidden = false;
+}
+
+// ---- Ask Claude: executable / settings config + activity log ----
+
+function renderClaudeCfgStatus(c) {
+  const parts = [c.available ? "✓ Ask Claude is enabled." : "Ask Claude is off — no claude executable found."];
+  if (c.exeWarning) parts.push("⚠ " + c.exeWarning);
+  if (c.settingsWarning) parts.push("⚠ " + c.settingsWarning);
+  $("#claudeCfgStatus").textContent = parts.join("  ");
+}
+
+// fields show the effective value (override or detected); the detected value
+// is also the placeholder, so clearing a field reads as "auto-detect"
+async function loadClaudeConfigUI() {
+  try {
+    const c = await fetch("/api/claude/config").then((r) => r.json());
+    $("#setClaudeExe").value = c.exe || c.detectedExe || "";
+    $("#setClaudeExe").placeholder = c.detectedExe || "not found — enter a path";
+    $("#setClaudeSettings").value = c.settingsFile || c.detectedSettings || "";
+    $("#setClaudeSettings").placeholder = c.detectedSettings || "claude default";
+    renderClaudeCfgStatus(c);
+  } catch {
+    $("#claudeCfgStatus").textContent = "Could not load Claude settings.";
+  }
+}
+
+async function saveClaudeConfig() {
+  const btn = $("#claudeCfgSave");
+  btn.disabled = true;
+  try {
+    const c = await fetch("/api/claude/config", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ exe: $("#setClaudeExe").value.trim(), settingsFile: $("#setClaudeSettings").value.trim() }),
+    }).then((r) => r.json());
+    $("#setClaudeExe").value = c.exe || c.detectedExe || "";
+    $("#setClaudeSettings").value = c.settingsFile || c.detectedSettings || "";
+    renderClaudeCfgStatus(c);
+    // availability may have changed — refresh meta so the panel button appears/hides now
+    state.meta = await fetch("/api/meta").then((r) => r.json());
+    renderClaudeUI();
+  } catch (e) {
+    $("#claudeCfgStatus").textContent = "Save failed: " + ((e && e.message) || e);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function renderClaudeLog() {
+  const box = $("#claudeLogList");
+  try {
+    const logs = await fetch("/api/claude/logs").then((r) => r.json());
+    if (!logs || !logs.length) { box.innerHTML = `<div class="cl-log-empty">No activity yet.</div>`; return; }
+    box.innerHTML = logs.map((l) => {
+      const when = new Date(l.time).toLocaleString();
+      const dur = l.ms >= 1000 ? (l.ms / 1000).toFixed(1) + "s" : (l.ms || 0) + "ms";
+      const meta = [l.noteTitle ? "📄 " + esc(l.noteTitle) : "", l.lines ? "✂ lines " + esc(l.lines) : "", dur]
+        .filter(Boolean).join(" · ");
+      return `<div class="cl-log-row${l.ok ? "" : " err"}">
+        <div class="cl-log-top"><span class="cl-log-time">${esc(when)}</span><span class="cl-log-prompt">${esc(l.prompt)}</span></div>
+        ${meta ? `<div class="cl-log-meta">${meta}</div>` : ""}
+        ${l.error ? `<div class="cl-log-err">${esc(l.error)}</div>` : ""}
+      </div>`;
+    }).join("");
+  } catch {
+    box.innerHTML = `<div class="cl-log-empty">Could not load the log.</div>`;
+  }
+}
+
+async function clearClaudeLog() {
+  await fetch("/api/claude/logs/clear", { method: "POST" });
+  renderClaudeLog();
 }
 
 async function checkForUpdates() {
@@ -1368,6 +1441,7 @@ async function claudeSend(message) {
     claudeAppendMessage("cl-error", esc(String((e && e.message) || e)));
   } finally {
     claudeSetStreaming(false);
+    if (!$("#settingsOverlay").hidden) renderClaudeLog(); // reflect this turn if the log is on screen
   }
 }
 
@@ -1712,6 +1786,8 @@ function bindEvents() {
   });
   $("#settingsSave").addEventListener("click", saveSettings);
   $("#backupNowBtn").addEventListener("click", backupNow);
+  $("#claudeCfgSave").addEventListener("click", saveClaudeConfig);
+  $("#claudeLogClear").addEventListener("click", clearClaudeLog);
 
   // global shortcuts
   document.addEventListener("keydown", (e) => {
