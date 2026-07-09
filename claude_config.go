@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -117,14 +118,46 @@ func sanitizeClaudeEnv(in []string) []string {
 	return out
 }
 
+// settingsFileEnv reads the "env" block from the effective settings.json and
+// returns it as sorted KEY=VALUE. Claude applies that block to its own runtime,
+// but too late for vars Node reads at startup (NODE_EXTRA_CA_CERTS) — hoisting
+// them into the spawned process's environment here makes them take effect. Nil
+// on any problem (no file, unreadable, no env block).
+func settingsFileEnv() []string {
+	path := effectiveClaudeSettings()
+	if path == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var s struct {
+		Env map[string]string `json:"env"`
+	}
+	if json.Unmarshal(raw, &s) != nil || len(s.Env) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(s.Env))
+	for k, v := range s.Env {
+		if k = strings.TrimSpace(k); k != "" {
+			out = append(out, k+"="+v)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // claudeSpawnEnv is the environment for the spawned claude: the inherited
-// environment with the configured KEY=VALUE vars appended so they win (used
-// for e.g. NODE_EXTRA_CA_CERTS behind a TLS-inspecting proxy). Returns nil
-// when nothing is configured, so the child simply inherits as before.
+// environment, then the settings.json "env" block, then the manually
+// configured KEY=VALUE box — later entries win, so the box overrides
+// settings.json which overrides inherited. Returns nil when nothing extra is
+// configured, so the child simply inherits as before.
 func claudeSpawnEnv() []string {
 	claudeCfg.mu.RLock()
-	extra := sanitizeClaudeEnv(claudeCfg.data.Env)
+	box := sanitizeClaudeEnv(claudeCfg.data.Env)
 	claudeCfg.mu.RUnlock()
+	extra := append(settingsFileEnv(), box...)
 	if len(extra) == 0 {
 		return nil
 	}
@@ -139,6 +172,7 @@ type claudeConfigResp struct {
 	DetectedSettings  string   `json:"detectedSettings"`
 	EffectiveExe      string   `json:"effectiveExe"`
 	EffectiveSettings string   `json:"effectiveSettings"`
+	SettingsEnv       []string `json:"settingsEnv"` // env block auto-loaded from settings.json
 	Available         bool     `json:"available"`
 	ExeWarning        string   `json:"exeWarning,omitempty"`
 	SettingsWarning   string   `json:"settingsWarning,omitempty"`
@@ -156,6 +190,7 @@ func claudeConfigResponse() claudeConfigResp {
 		DetectedSettings:  detectedClaudeSettings(),
 		EffectiveExe:      resolveClaudeExe(),
 		EffectiveSettings: effectiveClaudeSettings(),
+		SettingsEnv:       settingsFileEnv(),
 	}
 	resp.Available = resp.EffectiveExe != ""
 	if exe != "" && !fileExists(exe) {

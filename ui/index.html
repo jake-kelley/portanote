@@ -331,9 +331,10 @@
       <label class="setting-row col">Settings file <span class="mhint">--settings</span>
         <input id="setClaudeSettings" type="text" spellcheck="false" autocomplete="off" placeholder="claude default">
       </label>
-      <label class="setting-row col">Environment variables <span class="mhint">one KEY=VALUE per line — e.g. a proxy CA</span>
+      <label class="setting-row col">Environment variables <span class="mhint">one KEY=VALUE per line — merged into the spawned claude, overriding settings.json</span>
         <textarea id="setClaudeEnv" rows="2" spellcheck="false" autocomplete="off" placeholder="NODE_EXTRA_CA_CERTS=/path/to/proxy-root.crt"></textarea>
       </label>
+      <div id="claudeSettingsEnv" class="cl-settings-env" hidden></div>
       <div class="settings-status" id="claudeCfgStatus"></div>
       <div class="settings-actions">
         <button id="claudeCfgSave" class="btn-primary">Save Claude settings</button>

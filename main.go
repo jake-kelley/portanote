@@ -20,7 +20,7 @@ import (
 )
 
 // a var so test builds can override it with -ldflags "-X main.version=..."
-var version = "1.6.1"
+var version = "1.6.2"
 
 //go:embed all:ui
 var uiEmbed embed.FS

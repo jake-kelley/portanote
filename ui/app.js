@@ -875,10 +875,22 @@ async function loadClaudeConfigUI() {
     $("#setClaudeSettings").value = c.settingsFile || c.detectedSettings || "";
     $("#setClaudeSettings").placeholder = c.detectedSettings || "claude default";
     $("#setClaudeEnv").value = (c.env || []).join("\n");
+    renderClaudeSettingsEnv(c.settingsEnv);
     renderClaudeCfgStatus(c);
   } catch {
     $("#claudeCfgStatus").textContent = "Could not load Claude settings.";
   }
+}
+
+// read-only note of the env vars Portanote auto-loads from settings.json's env
+// block (keys only — values may be paths/secrets); merged into every turn
+function renderClaudeSettingsEnv(settingsEnv) {
+  const box = $("#claudeSettingsEnv");
+  const keys = (settingsEnv || []).map((v) => v.split("=")[0]).filter(Boolean);
+  if (!keys.length) { box.hidden = true; box.innerHTML = ""; return; }
+  box.hidden = false;
+  box.innerHTML = `<span class="cl-se-label">Auto-loaded from settings.json:</span> ` +
+    keys.map((k) => `<code>${esc(k)}</code>`).join(" ");
 }
 
 async function saveClaudeConfig() {

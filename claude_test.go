@@ -517,3 +517,50 @@ func TestClaudeConfigEnvRoundTrip(t *testing.T) {
 		t.Errorf("env not persisted: %v", claudeCfg.data.Env)
 	}
 }
+
+func TestSettingsFileEnv(t *testing.T) {
+	loadClaudeConfig(t.TempDir())
+	sf := filepath.Join(t.TempDir(), "settings.json")
+	os.WriteFile(sf, []byte(`{"env":{"NODE_EXTRA_CA_CERTS":"/x/ca.crt","CLAUDE_CODE_USE_VERTEX":"1"},"model":"sonnet"}`), 0o644)
+	claudeCfg.mu.Lock()
+	claudeCfg.data.SettingsFile = sf
+	claudeCfg.mu.Unlock()
+	got := strings.Join(settingsFileEnv(), "\n")
+	if !strings.Contains(got, "NODE_EXTRA_CA_CERTS=/x/ca.crt") || !strings.Contains(got, "CLAUDE_CODE_USE_VERTEX=1") {
+		t.Errorf("settingsFileEnv = %q", got)
+	}
+	// a settings file with no env block yields nothing
+	os.WriteFile(sf, []byte(`{"model":"sonnet"}`), 0o644)
+	if e := settingsFileEnv(); len(e) != 0 {
+		t.Errorf("no env block should yield nil, got %v", e)
+	}
+}
+
+func TestClaudeSpawnEnvMergesSettingsThenBox(t *testing.T) {
+	loadClaudeConfig(t.TempDir())
+	sf := filepath.Join(t.TempDir(), "settings.json")
+	os.WriteFile(sf, []byte(`{"env":{"NODE_EXTRA_CA_CERTS":"/from/settings","FOO":"settings"}}`), 0o644)
+	claudeCfg.mu.Lock()
+	claudeCfg.data.SettingsFile = sf
+	claudeCfg.data.Env = []string{"FOO=box"} // box overrides settings.json
+	claudeCfg.mu.Unlock()
+	env := claudeSpawnEnv()
+	if len(env) <= len(os.Environ()) {
+		t.Fatal("expected extras appended to inherited env")
+	}
+	// NODE_EXTRA_CA_CERTS comes only from settings.json; FOO appears from both,
+	// with the box value last so it wins
+	joined := strings.Join(env, "\n")
+	if !strings.Contains(joined, "NODE_EXTRA_CA_CERTS=/from/settings") {
+		t.Error("settings.json env not injected")
+	}
+	lastFoo := ""
+	for _, e := range env {
+		if strings.HasPrefix(e, "FOO=") {
+			lastFoo = e
+		}
+	}
+	if lastFoo != "FOO=box" {
+		t.Errorf("box should override settings.json: last FOO = %q", lastFoo)
+	}
+}
