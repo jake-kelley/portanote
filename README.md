@@ -2,7 +2,7 @@
 
 **A portable, single-binary notes app.** No installation, no admin rights, no Electron. Portanote is one small executable that serves a local web UI to your browser — your notes are plain Markdown files sitting right next to it, so your data is always yours.
 
-![Portanote — folder tree, tags, and a split Markdown editor rendering a table, code, a wiki-link, and a Mermaid diagram](docs/screenshot.png)
+![Portanote — the sidebar's folder tree and tags, a split Markdown editor rendering a table, code, and a Mermaid diagram, and the Ask Claude panel summarizing the open note](docs/screenshot.png)
 
 <sub>A dark theme is built in too — [dark screenshot](docs/screenshot-dark.png).</sub>
 
