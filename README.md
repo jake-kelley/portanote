@@ -1,4 +1,7 @@
-# 📝 Portanote
+<h1 align="center">
+  <img src="docs/logo.png" alt="" width="80"><br>
+  Portanote
+</h1>
 
 **A portable, single-binary notes app.** No installation, no admin rights, no Electron. Portanote is one small executable that serves a local web UI to your browser — your notes are plain Markdown files sitting right next to it, so your data is always yours.
 
