@@ -282,6 +282,9 @@ func newAPI(store *Store, uiFS fs.FS) http.Handler {
 		writeJSON(w, http.StatusOK, map[string][]string{"tags": store.SuggestTags(r.PathValue("id"), 6)})
 	})
 
+	// same shape, but asks the local claude CLI (opt-in via the settings toggle)
+	mux.HandleFunc("POST /api/notes/{id}/suggest-tags-ai", suggestTagsAIHandler(store))
+
 	mux.HandleFunc("GET /api/notes/{id}/backlinks", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, store.Backlinks(r.PathValue("id")))
 	})

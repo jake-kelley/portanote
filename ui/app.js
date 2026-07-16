@@ -6,6 +6,7 @@ const $$ = (s) => [...document.querySelectorAll(s)];
 
 const state = {
   meta: {},
+  settings: {},         // app settings from /api/settings (backups + AI tag toggle)
   notes: [],            // ListItem[] from /api/notes
   view: "all",          // all | starred | untagged | trash
   tag: null,            // active tag filter (exclusive with view/folder)
@@ -32,6 +33,8 @@ const state = {
   claudeStreaming: false,   // a turn is in flight
   claudeStopRequested: false,
   claudeAtBottom: true,     // auto-scroll the thread unless the user scrolled up
+  aiTags: null,             // {id, tags} — last AI tag suggestions; override the built-in ones
+  aiTagsBusy: false,        // a per-note or bulk AI tag run is in flight
 };
 
 /* ---------------------------------------------------------------- init */
@@ -42,14 +45,16 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (themeParam === "dark" || themeParam === "light") setTheme(themeParam === "dark");
   else if (localStorage.getItem("pn-theme") === "dark") setTheme(true);
 
-  const [meta, notes, folders, templates, tasks] = await Promise.all([
+  const [meta, notes, folders, templates, tasks, settings] = await Promise.all([
     fetch("/api/meta").then((r) => r.json()),
     fetch("/api/notes").then((r) => r.json()),
     fetch("/api/folders").then((r) => r.json()),
     fetch("/api/templates").then((r) => r.json()),
     fetch("/api/tasks").then((r) => r.json()),
+    fetch("/api/settings").then((r) => r.json()).catch(() => ({})),
   ]);
   state.meta = meta;
+  state.settings = settings || {};
   state.notes = notes;
   state.folders = folders.map((f) => f.name);
   state.templates = templates || [];
@@ -587,20 +592,71 @@ async function openWikilink(title) {
   $("#title").focus();
 }
 
-// offline topic-tag suggestions (server-side TF-IDF); click a chip to accept
+// the settings toggle only takes effect when the claude CLI is actually there
+function aiTagsEnabled() {
+  return !!(state.meta.claude && state.settings.aiTagSuggestions);
+}
+
+// topic-tag suggestions; click a chip to accept. Built-in TF-IDF by default;
+// once the user generates AI suggestions for this note, those override.
 async function refreshSuggestions() {
   const row = $("#suggestrow");
   const n = state.current;
   if (!n || n.trashed) { row.hidden = true; return; }
+  const noteId = n.id;
   try {
-    const res = await fetch(`/api/notes/${encodeURIComponent(n.id)}/suggest-tags`);
-    const { tags } = await res.json();
-    const fresh = (tags || []).filter((t) => !n.tags.includes(t));
-    if (!fresh.length) { row.hidden = true; $("#suggestchips").innerHTML = ""; return; }
-    $("#suggestchips").innerHTML = fresh.map((t) =>
-      `<button class="suggest-chip" data-suggest="${esc(t)}" title="Add tag">${esc(t)}</button>`).join("");
-    row.hidden = false;
+    const ai = !!(state.aiTags && state.aiTags.id === noteId && aiTagsEnabled());
+    let tags;
+    if (ai) {
+      tags = state.aiTags.tags;
+    } else {
+      const res = await fetch(`/api/notes/${encodeURIComponent(noteId)}/suggest-tags`);
+      ({ tags } = await res.json());
+    }
+    if (state.current?.id !== noteId) return;   // switched notes mid-fetch
+    const fresh = (tags || []).filter((t) => !state.current.tags.some((x) => x.toLowerCase() === t.toLowerCase()));
+    renderSuggestRow(fresh, ai);
   } catch { row.hidden = true; }
+}
+
+function renderSuggestRow(fresh, ai) {
+  const row = $("#suggestrow");
+  const btn = $("#aiSuggestBtn");
+  const aiOn = aiTagsEnabled();
+  if (!fresh.length && !aiOn) { row.hidden = true; $("#suggestchips").innerHTML = ""; return; }
+  $("#suggestLabel").textContent = ai ? "✳ Suggested" : "✨ Suggested";
+  $("#suggestchips").innerHTML = fresh.map((t) =>
+    `<button class="suggest-chip${ai ? " ai" : ""}" data-suggest="${esc(t)}" title="Add tag">${esc(t)}</button>`).join("");
+  btn.hidden = !aiOn;
+  if (aiOn && !state.aiTagsBusy) btn.textContent = ai ? "↻ Regenerate" : "✳ Generate AI suggestions";
+  row.hidden = false;
+}
+
+// per-note "Generate AI suggestions": ask the server (which spawns the local
+// claude CLI); the returned tags replace the built-in chips
+async function generateAITags() {
+  const n = state.current;
+  const btn = $("#aiSuggestBtn");
+  if (!n || n.trashed || !aiTagsEnabled() || state.aiTagsBusy) return;
+  if (state.dirty) await saveNow();             // Claude reads the saved state
+  const noteId = state.current.id;
+  state.aiTagsBusy = true;
+  btn.disabled = true;
+  btn.textContent = "✳ Generating…";
+  try {
+    const r = await fetch(`/api/notes/${encodeURIComponent(noteId)}/suggest-tags-ai`, { method: "POST" });
+    const res = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(res.error || "request failed (" + r.status + ")");
+    state.aiTags = { id: noteId, tags: res.tags || [] };
+    if (!(res.tags || []).length) setSaveState("saved", "✳ Claude had no new tags to suggest");
+  } catch (e) {
+    setSaveState("", "AI tag suggestions failed: " + ((e && e.message) || e));
+  } finally {
+    state.aiTagsBusy = false;
+    btn.disabled = false;
+    refreshSuggestions();                       // re-render chips + button label
+    if (!$("#settingsOverlay").hidden) renderClaudeLog();
+  }
 }
 
 function renderTemplateMenu() {
@@ -665,6 +721,9 @@ function renderBulkBar() {
   }
   bar.innerHTML = count + `<select id="bulkFolder"></select>` +
     `<button data-bulk="star" title="Star selected">⭐</button>` +
+    (aiTagsEnabled()
+      ? `<button data-bulk="aitags" title="Ask Claude to suggest tags for each selected note and apply them">✳ AI tags</button>`
+      : "") +
     `<button data-bulk="trash" title="Move selected to Trash">🗑</button>` +
     `<button data-bulk="clear" title="Clear selection">✕</button>`;
   $("#bulkFolder").innerHTML = `<option value="">Move to…</option><option value="__none__">(no folder)</option>` +
@@ -698,6 +757,50 @@ async function bulkApplyTo(ids, patch) {
 }
 const bulkApply = (patch) => bulkApplyTo([...state.selected], patch);
 const moveNotes = (ids, folder) => bulkApplyTo(ids, { folder });
+
+// generate AI tag suggestions for every selected note and apply them. Runs
+// sequentially — the server only allows one claude tag turn at a time.
+async function bulkAITags() {
+  const ids = [...state.selected];
+  if (!ids.length || state.aiTagsBusy || !aiTagsEnabled()) return;
+  const plural = ids.length === 1 ? "" : "s";
+  if (!confirm(`Ask Claude to suggest tags for ${ids.length} note${plural} and apply them?\n` +
+    `Each note's text is sent to the local claude CLI. This may take a while.`)) return;
+  state.aiTagsBusy = true;
+  let done = 0, tagged = 0, failed = 0;
+  try {
+    for (const id of ids) {
+      const counter = $("#bulkCount");
+      if (counter) counter.textContent = `✳ Tagging ${done + 1}/${ids.length}…`;
+      try {
+        const r = await fetch(`/api/notes/${encodeURIComponent(id)}/suggest-tags-ai`, { method: "POST" });
+        const res = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(res.error || r.status);
+        const fresh = res.tags || [];
+        if (fresh.length) {
+          const cur = state.notes.find((n) => n.id === id);
+          const tags = [...new Set([...(cur ? cur.tags : []), ...fresh])];
+          const put = await fetch("/api/notes/" + encodeURIComponent(id), {
+            method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tags }),
+          });
+          if (!put.ok) throw new Error("saving tags failed");
+          tagged++;
+        }
+      } catch { failed++; }
+      done++;
+    }
+  } finally {
+    state.aiTagsBusy = false;
+  }
+  state.selected.clear();
+  await reloadNotes();
+  if (state.current && ids.includes(state.current.id)) {  // open note may have new tags
+    const r = await fetch("/api/notes/" + encodeURIComponent(state.current.id));
+    if (r.ok) { state.current = await r.json(); renderEditor(); refreshSuggestions(); }
+  }
+  setSaveState(failed ? "" : "saved",
+    `✳ Tagged ${tagged} of ${ids.length} note${plural}` + (failed ? ` — ${failed} failed (see the Claude activity log)` : ""));
+}
 
 // permanently delete every selected (already-trashed) note
 async function bulkDeleteForever() {
@@ -845,8 +948,10 @@ function setMode(mode, persist = true) {
 
 async function openSettings() {
   const st = await fetch("/api/settings").then((r) => r.json());
+  state.settings = st;
   $("#setInterval").value = st.backupIntervalHours;
   $("#setKeep").value = st.backupKeep;
+  $("#setAITags").checked = !!st.aiTagSuggestions;
   renderBackupStatus(st);
   $("#updateStatus").textContent = "Portanote v" + state.meta.version;
   $("#updateApplyBtn").hidden = true;
@@ -909,6 +1014,8 @@ async function saveClaudeConfig() {
     // availability may have changed — refresh meta so the panel button appears/hides now
     state.meta = await fetch("/api/meta").then((r) => r.json());
     renderClaudeUI();
+    renderBulkBar();        // the AI tag actions are gated on availability too
+    refreshSuggestions();
   } catch (e) {
     $("#claudeCfgStatus").textContent = "Save failed: " + ((e && e.message) || e);
   } finally {
@@ -1013,8 +1120,21 @@ async function saveSettings() {
   const st = await fetch("/api/settings", {
     method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
   }).then((r) => r.json());
+  state.settings = st;
   renderBackupStatus(st);
   $("#settingsOverlay").hidden = true;
+}
+
+// the AI tag toggle saves immediately (the backup Save button doesn't cover it)
+async function saveAITagSetting(on) {
+  const st = await fetch("/api/settings", {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ aiTagSuggestions: on }),
+  }).then((r) => r.json());
+  state.settings = st;
+  $("#setAITags").checked = !!st.aiTagSuggestions;
+  renderBulkBar();
+  refreshSuggestions();
 }
 // re-index the notes folder from disk (external adds/edits/deletes), then refresh
 async function syncNow() {
@@ -1603,6 +1723,7 @@ function bindEvents() {
     if (!b) return;
     switch (b.dataset.bulk) {
       case "star":    bulkApply({ starred: true }); break;
+      case "aitags":  bulkAITags(); break;
       case "trash":   bulkApply({ trashed: true }); break;
       case "restore": bulkApply({ trashed: false }); break;
       case "purge":   bulkDeleteForever(); break;
@@ -1735,6 +1856,7 @@ function bindEvents() {
     const b = e.target.closest("[data-suggest]");
     if (b) addTag(b.dataset.suggest);
   });
+  $("#aiSuggestBtn").addEventListener("click", generateAITags);
 
   // note actions
   $("#starBtn").addEventListener("click", toggleStar);
@@ -1800,6 +1922,7 @@ function bindEvents() {
     if (e.target.id === "settingsOverlay") $("#settingsOverlay").hidden = true;
   });
   $("#settingsSave").addEventListener("click", saveSettings);
+  $("#setAITags").addEventListener("change", (e) => saveAITagSetting(e.target.checked));
   $("#backupNowBtn").addEventListener("click", backupNow);
   $("#claudeCfgSave").addEventListener("click", saveClaudeConfig);
   $("#claudeLogClear").addEventListener("click", clearClaudeLog);

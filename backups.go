@@ -15,6 +15,10 @@ import (
 type Settings struct {
 	BackupIntervalHours int `json:"backupIntervalHours"`
 	BackupKeep          int `json:"backupKeep"`
+	// AITagSuggestions surfaces the "Generate AI suggestions" tag actions in the
+	// UI (per-note and bulk). A pointer so a PUT that omits it merges like the
+	// non-zero ints do, instead of resetting the toggle.
+	AITagSuggestions *bool `json:"aiTagSuggestions,omitempty"`
 }
 
 func defaultSettings() Settings { return Settings{BackupIntervalHours: 3, BackupKeep: 12} }
@@ -32,6 +36,9 @@ func (s *Store) loadSettings() {
 			}
 			if st.BackupKeep > 0 {
 				s.settings.BackupKeep = st.BackupKeep
+			}
+			if st.AITagSuggestions != nil {
+				s.settings.AITagSuggestions = st.AITagSuggestions
 			}
 		}
 	}
@@ -51,6 +58,9 @@ func (s *Store) SaveSettings(in Settings) Settings {
 	}
 	if in.BackupKeep > 0 {
 		s.settings.BackupKeep = in.BackupKeep
+	}
+	if in.AITagSuggestions != nil {
+		s.settings.AITagSuggestions = in.AITagSuggestions
 	}
 	out := s.settings
 	s.setMu.Unlock()

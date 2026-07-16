@@ -109,8 +109,10 @@
       </div>
 
       <div id="suggestrow" hidden>
-        <span class="suggest-label">✨ Suggested</span>
+        <span class="suggest-label" id="suggestLabel">✨ Suggested</span>
         <span id="suggestchips"></span>
+        <button id="aiSuggestBtn" class="ai-suggest-btn" hidden
+          title="Ask Claude to suggest tags for this note — replaces the built-in suggestions">✳ Generate AI suggestions</button>
       </div>
 
       <div id="toolbar">
@@ -335,6 +337,12 @@
         <textarea id="setClaudeEnv" rows="2" spellcheck="false" autocomplete="off" placeholder="NODE_EXTRA_CA_CERTS=/path/to/proxy-root.crt"></textarea>
       </label>
       <div id="claudeSettingsEnv" class="cl-settings-env" hidden></div>
+      <label class="setting-row"><input type="checkbox" id="setAITags">
+        Use AI tag suggestions (Ask Claude) instead of the built-in keyword suggester
+      </label>
+      <p class="settings-desc">Adds a “✳ Generate AI suggestions” button to the tag suggestion row and an “✳ AI tags”
+        bulk action for selected notes. The note text and your existing tags are sent to the local <code>claude</code> CLI.
+        Saved immediately.</p>
       <div class="settings-status" id="claudeCfgStatus"></div>
       <div class="settings-actions">
         <button id="claudeCfgSave" class="btn-primary">Save Claude settings</button>

@@ -173,6 +173,8 @@ Since folders and notes are just directories and `.md` files, you can reorganize
 
 Add tags in the tag row under a note's title. As you write, a **✨ Suggested** row proposes tags derived from the note's title and headers — click one to accept. Suggestions are computed locally; nothing leaves your machine.
 
+If Ask Claude is set up, a toggle in ⚙ Settings → *Ask Claude* adds AI tag suggestions on top: a **✳ Generate AI suggestions** button appears next to the built-in chips (Claude reads the note plus your existing tag vocabulary and prefers reusing your tags over inventing new ones), and an **✳ AI tags** bulk action tags every selected note in one go. The built-in suggestions stay instant and offline; Claude only runs when you click.
+
 ### Search
 
 Type in the search box for instant full-text results. Combine free text with operators:
@@ -260,6 +262,7 @@ If the [Claude Code CLI](https://claude.com/claude-code) is installed and logged
 - **Quick actions**: *Summarize*, *Improve* (suggestions only, never silent edits), *Extract tasks* (action items land in your To-Do list, linked back to the note), *Suggest tags*.
 - **Free-form**: ask anything about the note or your collection — Claude can search, read, create, and edit notes through Portanote's own MCP tools.
 - **Targeted edits**: highlight lines in the editor before sending and Claude receives those line numbers and their content as the region you mean — "fix this", "rewrite these lines", "expand this section" apply right there. A `✂ Targeting lines N–M` chip above the composer shows what's selected.
+- **AI tag suggestions**: an opt-in settings toggle puts a *Generate AI suggestions* button in the tag suggestion row (per note) and an *AI tags* action in the bulk bar (selected notes). See [Tags & suggestions](#tags--suggestions).
 
 How it works and what it can touch: each message spawns a fresh headless `claude` process that connects back to this Portanote instance over localhost. It is restricted to Portanote's note/task tools — no shell, no file access, no web. Anything it changes goes through the same store as the UI (so edits are indexed instantly, and "deleting" is only ever the recoverable trash). Your editor autosaves before each message and locks while Claude works; the note and To-Do list refresh when it finishes.
 
