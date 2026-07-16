@@ -30,6 +30,142 @@ func mustUpdate(t *testing.T, s *Store, id string, req UpdateReq) *Note {
 
 func strp(v string) *string { return &v }
 
+// Frontmatter written by another tool survives Portanote editing the note:
+// notes are just files, so keys Portanote doesn't own must come back verbatim.
+func TestFrontmatterPreservesForeignKeys(t *testing.T) {
+	dir := t.TempDir()
+	raw := "---\r\n" + // CRLF: a note edited on Windows by another editor
+		"# who wrote this\r\n" +
+		"type: Runbook\r\n" +
+		"title: Restart the Ingress\r\n" +
+		"description: How to safely restart the ingress controller.\r\n" +
+		"aliases:\r\n" +
+		"  - ingress-restart\r\n" +
+		"  - bounce-ingress\r\n" +
+		"review:\r\n" +
+		"  by: jake\r\n" +
+		"  every: 90d\r\n" +
+		"tags: [k8s, ingress]\r\n" +
+		"starred: false\r\n" +
+		"---\r\n\r\n# Restart the Ingress\r\n"
+	if err := os.WriteFile(filepath.Join(dir, "restart-ingress.md"), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Portanote's own keys are still parsed, not swept into the kept lines
+	n := s.List()[0]
+	if n.Title != "Restart the Ingress" || strings.Join(n.Tags, ",") != "k8s,ingress" || n.Starred {
+		t.Fatalf("owned keys mis-parsed: %+v", n)
+	}
+
+	mustUpdate(t, s, n.ID, UpdateReq{Starred: boolp(true)}) // any ordinary edit rewrites the file
+	out := readNoteFile(t, dir, n.ID)
+
+	for _, want := range []string{
+		"# who wrote this",
+		"type: Runbook",
+		"description: How to safely restart the ingress controller.",
+		"aliases:",
+		"  - ingress-restart",
+		"  - bounce-ingress",
+		"review:",
+		"  by: jake",
+		"  every: 90d",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("save dropped %q from the frontmatter:\n%s", want, out)
+		}
+	}
+	// the edit still landed, and Portanote's fields aren't duplicated
+	if !strings.Contains(out, "starred: true") || strings.Count(out, "starred:") != 1 {
+		t.Errorf("owned key not rewritten cleanly:\n%s", out)
+	}
+	if strings.Count(out, "type: Runbook") != 1 {
+		t.Errorf("kept key duplicated on save:\n%s", out)
+	}
+	// and it all survives a second round trip (reload from disk, save again)
+	s2, err := NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustUpdate(t, s2, n.ID, UpdateReq{Body: strp("edited\n")})
+	if out2 := readNoteFile(t, dir, n.ID); !strings.Contains(out2, "type: Runbook") ||
+		!strings.Contains(out2, "  by: jake") {
+		t.Errorf("kept keys lost on the second round trip:\n%s", out2)
+	}
+}
+
+// Block-form tags (what Obsidian writes by default) are read, not emptied.
+func TestFrontmatterBlockFormTags(t *testing.T) {
+	dir := t.TempDir()
+	raw := "---\ntitle: Obsidian Style\ntags:\n  - k8s\n  - \"quoted tag\"\ntype: Runbook\n---\n\n# Obsidian Style\n"
+	if err := os.WriteFile(filepath.Join(dir, "obsidian-style.md"), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := s.List()[0]
+	if got := strings.Join(n.Tags, "|"); got != "k8s|quoted tag" {
+		t.Fatalf("block-form tags = %q, want k8s|quoted tag", got)
+	}
+	// the list items belong to tags, so they must not leak into the kept lines
+	mustUpdate(t, s, n.ID, UpdateReq{Starred: boolp(true)})
+	out := readNoteFile(t, dir, n.ID)
+	if !strings.Contains(out, "tags: [k8s, quoted tag]") {
+		t.Errorf("tags not rewritten:\n%s", out)
+	}
+	if strings.Contains(out, "- k8s") || strings.Count(out, "k8s") != 1 {
+		t.Errorf("tag items duplicated into the kept frontmatter:\n%s", out)
+	}
+	if !strings.Contains(out, "type: Runbook") {
+		t.Errorf("foreign key after the tags block was lost:\n%s", out)
+	}
+}
+
+// A note Portanote wrote itself has no foreign keys and gains no blank padding.
+func TestFrontmatterCleanForOwnNotes(t *testing.T) {
+	s, dir := newTestStore(t)
+	n, err := s.Create("Plain Note")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := readNoteFile(t, dir, n.ID)
+	fm, _, _ := strings.Cut(strings.TrimPrefix(out, "---\n"), "---\n")
+	for _, line := range strings.Split(strings.TrimSuffix(fm, "\n"), "\n") {
+		key, _, _ := strings.Cut(line, ":")
+		if !knownFM[strings.TrimSpace(key)] {
+			t.Errorf("unexpected line %q in a fresh note's frontmatter:\n%s", line, fm)
+		}
+	}
+}
+
+func boolp(v bool) *bool { return &v }
+
+// readNoteFile finds the note's file on disk (the name tracks folder+title) and
+// returns its contents.
+func readNoteFile(t *testing.T, dir, id string) string {
+	t.Helper()
+	var found string
+	filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".md") {
+			return nil
+		}
+		if raw, err := os.ReadFile(p); err == nil && strings.Contains(string(raw), `id: "`+id+`"`) {
+			found = string(raw)
+		}
+		return nil
+	})
+	if found == "" {
+		t.Fatalf("no file on disk for note %s", id)
+	}
+	return found
+}
+
 // A hand-made subdirectory with a plain .md file is adopted as a folder.
 func TestScanAdoptsSubdirectories(t *testing.T) {
 	dir := t.TempDir()

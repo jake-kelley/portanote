@@ -260,6 +260,8 @@ updated: 2026-07-05T04:35:21Z
 
 Files without frontmatter are adopted as-is (the title comes from the first heading, timestamps from the file, the folder from the directory it sits in), so you can drop an existing Markdown folder — subfolders and all — into `notes/` and it just works. Files added while the app is running are indexed when you click the `⟳` sync button in the sidebar (or on the next start). The names `templates`, `backups`, and `attachments` are reserved for Portanote at the top level, and dot-directories are ignored. Trash is a flag, not a folder — "Delete forever" in the Trash view is what actually removes a file.
 
+**Frontmatter Portanote doesn't recognize is left alone.** Only the keys above are Portanote's; anything else another tool put there — an Obsidian property, a Hugo `draft:`, a `type:` for some agent, your own script's field, nested values and comments included — is preserved word for word when Portanote saves the note. Tags written as a YAML list (Obsidian's default) are read too, and rewritten in the inline form above. So Portanote can share a folder with your other Markdown tools without either one clobbering the other.
+
 > **Upgrading from ≤ v1.0?** The old flat layout (a `folder:` frontmatter field plus `.portanote-folders.json`) is migrated automatically on first start: each note's file moves into its folder's directory and the manifest is replaced by the directories themselves.
 
 ---

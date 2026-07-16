@@ -32,8 +32,9 @@ type Meta struct {
 
 type Note struct {
 	Meta
-	Body string `json:"body"`
-	file string // path relative to the notes dir, slash-separated, no ".md"; tracks folder+date+title, server-only
+	Body    string   `json:"body"`
+	file    string   // path relative to the notes dir, slash-separated, no ".md"; tracks folder+date+title, server-only
+	extraFM []string // frontmatter Portanote doesn't own, kept verbatim (see knownFM)
 }
 
 type ListItem struct {
@@ -557,6 +558,10 @@ func serializeNote(n *Note) string {
 	fmt.Fprintf(&b, "trashed: %v\n", n.Trashed)
 	fmt.Fprintf(&b, "created: %s\n", n.Created.Format(time.RFC3339))
 	fmt.Fprintf(&b, "updated: %s\n", n.Updated.Format(time.RFC3339))
+	for _, line := range n.extraFM { // whatever another tool put here, back as it was
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
 	b.WriteString("---\n\n")
 	b.WriteString(n.Body)
 	return b.String()
@@ -593,15 +598,51 @@ func findFrontmatterEnd(s string) int {
 	return -1
 }
 
+// knownFM are the frontmatter keys Portanote owns — parsed into Meta here and
+// rewritten from it by serializeNote. Every other key belongs to whatever else
+// touches these files (an Obsidian property, a Hugo draft flag, OKF's type:, a
+// script's own field) and is preserved verbatim: notes are just files, so an
+// editor that quietly ate metadata it didn't recognize would be lying about it.
+var knownFM = map[string]bool{
+	"id": true, "title": true, "tags": true, "starred": true,
+	"trashed": true, "created": true, "updated": true,
+	"folder": true, // legacy: read to migrate to the directory layout, never written back
+}
+
+// fmContinues reports whether a frontmatter line belongs to the key above it
+// (an indented mapping entry or list item) rather than starting a new key.
+func fmContinues(line string) bool {
+	return line != "" && (line[0] == ' ' || line[0] == '\t')
+}
+
 func parseFrontmatter(fm string, n *Note) {
+	keeping := false // inside an unowned key: capture it and whatever indents under it
+	inTags := false  // inside a block-form `tags:` list, one "- tag" per line
 	for _, line := range strings.Split(fm, "\n") {
 		line = strings.TrimRight(line, "\r")
-		key, val, ok := strings.Cut(line, ":")
-		if !ok {
+		if line == "" || fmContinues(line) {
+			switch {
+			case keeping:
+				n.extraFM = append(n.extraFM, line)
+			case inTags:
+				if item, ok := strings.CutPrefix(strings.TrimSpace(line), "-"); ok {
+					if t := strings.TrimSpace(unquote(strings.TrimSpace(item))); t != "" {
+						n.Tags = append(n.Tags, t)
+					}
+				}
+			}
 			continue
 		}
+		key, val, ok := strings.Cut(line, ":")
+		key = strings.TrimSpace(key)
+		if !ok || !knownFM[key] {
+			keeping, inTags = true, false // an unowned key, a comment, or a stray line
+			n.extraFM = append(n.extraFM, line)
+			continue
+		}
+		keeping, inTags = false, false
 		val = strings.TrimSpace(val)
-		switch strings.TrimSpace(key) {
+		switch key {
 		case "id":
 			if v := unquote(val); v != "" {
 				n.ID = v
@@ -611,6 +652,10 @@ func parseFrontmatter(fm string, n *Note) {
 		case "folder": // legacy (pre-directory layout); read only to migrate
 			n.Folder = unquote(val)
 		case "tags":
+			if val == "" { // block form (what Obsidian writes): items follow, indented
+				inTags = true
+				break
+			}
 			val = strings.Trim(val, "[]")
 			for _, t := range strings.Split(val, ",") {
 				if t = strings.TrimSpace(unquote(strings.TrimSpace(t))); t != "" {
@@ -630,6 +675,10 @@ func parseFrontmatter(fm string, n *Note) {
 				n.Updated = t
 			}
 		}
+	}
+	// blank lines trailing the last unowned key are padding, not content
+	for len(n.extraFM) > 0 && strings.TrimSpace(n.extraFM[len(n.extraFM)-1]) == "" {
+		n.extraFM = n.extraFM[:len(n.extraFM)-1]
 	}
 }
 
