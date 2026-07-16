@@ -952,6 +952,7 @@ async function openSettings() {
   $("#setInterval").value = st.backupIntervalHours;
   $("#setKeep").value = st.backupKeep;
   $("#setAITags").checked = !!st.aiTagSuggestions;
+  $("#setUpdateURL").value = st.updateURL || "";
   renderBackupStatus(st);
   $("#updateStatus").textContent = "Portanote v" + state.meta.version;
   $("#updateApplyBtn").hidden = true;
@@ -1058,12 +1059,13 @@ async function checkForUpdates() {
     const r = await fetch("/api/update/check");
     const info = await r.json();
     if (!r.ok) throw new Error(info.error || "check failed");
+    const from = info.source ? ` — from ${info.source}` : "";
     if (info.available) {
-      st.textContent = `${info.latest} is available (you have ${info.current}).`;
+      st.textContent = `${info.latest} is available (you have ${info.current})${from}.`;
       $("#updateApplyBtn").hidden = false;
       $("#updateApplyBtn").disabled = false;
     } else {
-      st.textContent = `You're up to date (${info.current}).`;
+      st.textContent = `You're up to date (${info.current})${from}.`;
     }
   } catch (e) {
     st.textContent = "Update check failed: " + e.message;
@@ -1123,6 +1125,25 @@ async function saveSettings() {
   state.settings = st;
   renderBackupStatus(st);
   $("#settingsOverlay").hidden = true;
+}
+
+// the update repository URL saves immediately; a URL the updater can't use is
+// rejected server-side and shown in the Updates status line
+async function saveUpdateURL(value) {
+  const r = await fetch("/api/settings", {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ updateURL: value.trim() }),
+  });
+  const st = await r.json();
+  if (!r.ok) {
+    $("#updateStatus").textContent = "⚠ " + (st.error || "invalid update URL");
+    return;
+  }
+  state.settings = st;
+  $("#setUpdateURL").value = st.updateURL || "";
+  $("#updateStatus").textContent = st.updateURL
+    ? "Updates will come from " + st.updateURL
+    : "Updates will come from the default GitHub repository.";
 }
 
 // the AI tag toggle saves immediately (the backup Save button doesn't cover it)
@@ -1923,6 +1944,7 @@ function bindEvents() {
   });
   $("#settingsSave").addEventListener("click", saveSettings);
   $("#setAITags").addEventListener("change", (e) => saveAITagSetting(e.target.checked));
+  $("#setUpdateURL").addEventListener("change", (e) => saveUpdateURL(e.target.value));
   $("#backupNowBtn").addEventListener("click", backupNow);
   $("#claudeCfgSave").addEventListener("click", saveClaudeConfig);
   $("#claudeLogClear").addEventListener("click", clearClaudeLog);

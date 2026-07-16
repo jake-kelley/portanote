@@ -1,7 +1,12 @@
 package main
 
-// Self-update from GitHub Releases. The check hits the public releases API
-// (a private repo needs a token in PORTANOTE_GITHUB_TOKEN or GITHUB_TOKEN).
+// Self-update from GitHub or GitLab releases. By default the check hits the
+// public GitHub releases API for updateRepo; the settings' "update repository
+// URL" points it elsewhere instead — github.com URLs use the GitHub API, any
+// other host is treated as a (self-managed) GitLab instance and spoken to via
+// its /api/v4 releases API. Private repos need a token in the environment:
+// PORTANOTE_GITHUB_TOKEN / GITHUB_TOKEN (GitHub, sent as a Bearer token) or
+// PORTANOTE_GITLAB_TOKEN / GITLAB_TOKEN (GitLab, sent as PRIVATE-TOKEN).
 // The platform binary is verified against the release's sha256sums.txt, the
 // running executable is swapped by rename (legal on Windows and macOS even
 // while running), and the process relaunches itself with the same arguments;
@@ -16,6 +21,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"runtime"
@@ -26,11 +32,59 @@ import (
 )
 
 const updateRepo = "jake-kelley/portanote"
+const defaultUpdateURL = "https://github.com/" + updateRepo
 
 // a var so tests can point it at a stub server
 var updateAPIBase = "https://api.github.com"
 
 var updateInFlight atomic.Bool
+
+// configuredUpdateURL holds the settings' update repository URL ("" = the
+// default GitHub repo). backups.go stores it here on load and save so the
+// updater doesn't need a *Store.
+var configuredUpdateURL atomic.Value // string
+
+func setUpdateURL(u string) { configuredUpdateURL.Store(strings.TrimSpace(u)) }
+
+// updateSource is a resolved place to pull releases from.
+type updateSource struct {
+	kind string // "github" | "gitlab"
+	api  string // API base, no trailing slash
+	proj string // owner/repo (github) or URL-escaped project path (gitlab)
+	host string // for display and error messages
+}
+
+// parseUpdateURL turns a repository web URL into an update source. Empty means
+// the built-in default. github.com speaks the GitHub API; every other host is
+// assumed to be a GitLab instance (the self-hosting case this exists for).
+func parseUpdateURL(raw string) (*updateSource, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return &updateSource{kind: "github", api: updateAPIBase, proj: updateRepo, host: "github.com"}, nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return nil, fmt.Errorf("update URL must look like https://host/owner/repo, got %q", raw)
+	}
+	proj := strings.TrimSuffix(strings.Trim(u.Path, "/"), ".git")
+	if proj == "" || !strings.Contains(proj, "/") {
+		return nil, fmt.Errorf("update URL needs the full project path (https://host/owner/repo), got %q", raw)
+	}
+	if strings.EqualFold(u.Hostname(), "github.com") {
+		return &updateSource{kind: "github", api: updateAPIBase, proj: proj, host: u.Host}, nil
+	}
+	return &updateSource{
+		kind: "gitlab",
+		api:  u.Scheme + "://" + u.Host + "/api/v4",
+		proj: url.PathEscape(proj),
+		host: u.Host,
+	}, nil
+}
+
+func resolveUpdateSource() (*updateSource, error) {
+	raw, _ := configuredUpdateURL.Load().(string)
+	return parseUpdateURL(raw)
+}
 
 type ghAsset struct {
 	Name string `json:"name"`
@@ -43,21 +97,32 @@ type ghRelease struct {
 	Assets []ghAsset `json:"assets"`
 }
 
-func ghGet(url, accept string, timeout time.Duration) (*http.Response, error) {
-	req, err := http.NewRequest("GET", url, nil)
+func updateGet(src *updateSource, rawURL, accept string, timeout time.Duration) (*http.Response, error) {
+	req, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Accept", accept)
 	req.Header.Set("User-Agent", "portanote/"+version)
-	token := os.Getenv("PORTANOTE_GITHUB_TOKEN")
-	if token == "" {
-		token = os.Getenv("GITHUB_TOKEN")
-	}
-	if token != "" {
-		// Go strips Authorization on the cross-host redirect to the CDN,
-		// which is exactly what GitHub's asset downloads require
-		req.Header.Set("Authorization", "Bearer "+token)
+	if src.kind == "gitlab" {
+		token := os.Getenv("PORTANOTE_GITLAB_TOKEN")
+		if token == "" {
+			token = os.Getenv("GITLAB_TOKEN")
+		}
+		if token != "" {
+			// a custom header, so Go keeps it across same-host redirects
+			req.Header.Set("PRIVATE-TOKEN", token)
+		}
+	} else {
+		token := os.Getenv("PORTANOTE_GITHUB_TOKEN")
+		if token == "" {
+			token = os.Getenv("GITHUB_TOKEN")
+		}
+		if token != "" {
+			// Go strips Authorization on the cross-host redirect to the CDN,
+			// which is exactly what GitHub's asset downloads require
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
 	}
 	resp, err := (&http.Client{Timeout: timeout}).Do(req)
 	if err != nil {
@@ -66,15 +131,22 @@ func ghGet(url, accept string, timeout time.Duration) (*http.Response, error) {
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
 		if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusUnauthorized {
-			return nil, fmt.Errorf("GitHub returned %d — if the repository is private, set PORTANOTE_GITHUB_TOKEN", resp.StatusCode)
+			envHint := "PORTANOTE_GITHUB_TOKEN"
+			if src.kind == "gitlab" {
+				envHint = "PORTANOTE_GITLAB_TOKEN"
+			}
+			return nil, fmt.Errorf("%s returned %d — if the repository is private, set %s", src.host, resp.StatusCode, envHint)
 		}
-		return nil, fmt.Errorf("GitHub returned %d for %s", resp.StatusCode, url)
+		return nil, fmt.Errorf("%s returned %d for %s", src.host, resp.StatusCode, rawURL)
 	}
 	return resp, nil
 }
 
-func latestRelease() (*ghRelease, error) {
-	resp, err := ghGet(updateAPIBase+"/repos/"+updateRepo+"/releases/latest",
+func latestRelease(src *updateSource) (*ghRelease, error) {
+	if src.kind == "gitlab" {
+		return latestGitLabRelease(src)
+	}
+	resp, err := updateGet(src, src.api+"/repos/"+src.proj+"/releases/latest",
 		"application/vnd.github+json", 15*time.Second)
 	if err != nil {
 		return nil, err
@@ -88,6 +160,38 @@ func latestRelease() (*ghRelease, error) {
 		return nil, errors.New("latest release has no tag")
 	}
 	return &rel, nil
+}
+
+// latestGitLabRelease reads GitLab's release shape (assets live under
+// assets.links with direct_asset_url) and maps it onto ghRelease so the rest
+// of the updater is provider-agnostic.
+func latestGitLabRelease(src *updateSource) (*ghRelease, error) {
+	resp, err := updateGet(src, src.api+"/projects/"+src.proj+"/releases/permalink/latest",
+		"application/json", 15*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var gl struct {
+		Tag    string `json:"tag_name"`
+		Assets struct {
+			Links []struct {
+				Name string `json:"name"`
+				URL  string `json:"direct_asset_url"`
+			} `json:"links"`
+		} `json:"assets"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&gl); err != nil {
+		return nil, fmt.Errorf("could not parse the release: %w", err)
+	}
+	if gl.Tag == "" {
+		return nil, errors.New("latest release has no tag")
+	}
+	rel := &ghRelease{Tag: gl.Tag}
+	for _, l := range gl.Assets.Links {
+		rel.Assets = append(rel.Assets, ghAsset{Name: l.Name, URL: l.URL})
+	}
+	return rel, nil
 }
 
 // versionNewer reports whether a (like "v1.2.3" or "1.2.3") is newer than b.
@@ -138,10 +242,15 @@ type UpdateInfo struct {
 	Latest    string `json:"latest"`
 	Available bool   `json:"available"`
 	Asset     string `json:"asset,omitempty"`
+	Source    string `json:"source,omitempty"` // host releases come from
 }
 
 func checkUpdate() (UpdateInfo, error) {
-	rel, err := latestRelease()
+	src, err := resolveUpdateSource()
+	if err != nil {
+		return UpdateInfo{}, err
+	}
+	rel, err := latestRelease(src)
 	if err != nil {
 		return UpdateInfo{}, err
 	}
@@ -150,13 +259,18 @@ func checkUpdate() (UpdateInfo, error) {
 		Latest:    rel.Tag,
 		Available: versionNewer(rel.Tag, version),
 		Asset:     updateAssetName(),
+		Source:    src.host,
 	}, nil
 }
 
 // applyUpdate downloads the latest platform binary next to exe, verifies its
 // checksum, and swaps it into place. The caller relaunches afterwards.
 func applyUpdate(exe string) (string, error) {
-	rel, err := latestRelease()
+	src, err := resolveUpdateSource()
+	if err != nil {
+		return "", err
+	}
+	rel, err := latestRelease(src)
 	if err != nil {
 		return "", err
 	}
@@ -183,12 +297,12 @@ func applyUpdate(exe string) (string, error) {
 		return "", fmt.Errorf("release %s has no sha256sums.txt — refusing an unverifiable update", rel.Tag)
 	}
 
-	want, err := fetchChecksum(sums.URL, name)
+	want, err := fetchChecksum(src, sums.URL, name)
 	if err != nil {
 		return "", err
 	}
 	tmp := exe + ".new"
-	sum, size, err := downloadTo(tmp, bin.URL)
+	sum, size, err := downloadTo(src, tmp, bin.URL)
 	if err != nil {
 		os.Remove(tmp)
 		return "", err
@@ -218,8 +332,8 @@ func applyUpdate(exe string) (string, error) {
 }
 
 // fetchChecksum pulls sha256sums.txt and returns the hex digest listed for name.
-func fetchChecksum(url, name string) (string, error) {
-	resp, err := ghGet(url, "application/octet-stream", 30*time.Second)
+func fetchChecksum(src *updateSource, url, name string) (string, error) {
+	resp, err := updateGet(src, url, "application/octet-stream", 30*time.Second)
 	if err != nil {
 		return "", err
 	}
@@ -238,8 +352,8 @@ func fetchChecksum(url, name string) (string, error) {
 }
 
 // downloadTo streams url into path (0755) and returns the sha256 and size.
-func downloadTo(path, url string) (string, int64, error) {
-	resp, err := ghGet(url, "application/octet-stream", 5*time.Minute)
+func downloadTo(src *updateSource, path, url string) (string, int64, error) {
+	resp, err := updateGet(src, url, "application/octet-stream", 5*time.Minute)
 	if err != nil {
 		return "", 0, err
 	}

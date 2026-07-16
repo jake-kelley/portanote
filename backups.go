@@ -19,6 +19,9 @@ type Settings struct {
 	// UI (per-note and bulk). A pointer so a PUT that omits it merges like the
 	// non-zero ints do, instead of resetting the toggle.
 	AITagSuggestions *bool `json:"aiTagSuggestions,omitempty"`
+	// UpdateURL is the repository releases are pulled from; "" = the default
+	// GitHub repo. A pointer for the same omitted-vs-cleared reason.
+	UpdateURL *string `json:"updateURL,omitempty"`
 }
 
 func defaultSettings() Settings { return Settings{BackupIntervalHours: 3, BackupKeep: 12} }
@@ -40,7 +43,13 @@ func (s *Store) loadSettings() {
 			if st.AITagSuggestions != nil {
 				s.settings.AITagSuggestions = st.AITagSuggestions
 			}
+			if st.UpdateURL != nil {
+				s.settings.UpdateURL = st.UpdateURL
+			}
 		}
+	}
+	if s.settings.UpdateURL != nil {
+		setUpdateURL(*s.settings.UpdateURL) // hand it to the updater
 	}
 }
 
@@ -61,6 +70,11 @@ func (s *Store) SaveSettings(in Settings) Settings {
 	}
 	if in.AITagSuggestions != nil {
 		s.settings.AITagSuggestions = in.AITagSuggestions
+	}
+	if in.UpdateURL != nil {
+		trimmed := strings.TrimSpace(*in.UpdateURL)
+		s.settings.UpdateURL = &trimmed
+		setUpdateURL(trimmed)
 	}
 	out := s.settings
 	s.setMu.Unlock()

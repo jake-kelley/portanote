@@ -136,6 +136,12 @@ func newAPI(store *Store, uiFS fs.FS) http.Handler {
 			writeErr(w, http.StatusBadRequest, err)
 			return
 		}
+		if in.UpdateURL != nil { // reject a URL the updater couldn't use
+			if _, err := parseUpdateURL(*in.UpdateURL); err != nil {
+				writeErr(w, http.StatusBadRequest, err)
+				return
+			}
+		}
 		store.SaveSettings(in)
 		writeJSON(w, http.StatusOK, store.BackupStatus())
 	})
