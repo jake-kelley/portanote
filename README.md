@@ -1,3 +1,12 @@
+---
+type: Project Documentation
+title: Portanote
+description: A portable, single-binary Markdown notes app — why it exists, features, install and usage, Ask Claude, the MCP server, and how to build it.
+resource: https://github.com/jake-kelley/portanote
+tags: [notes, markdown, go, portable, self-hosted, mcp, claude]
+timestamp: 2026-07-15T22:09:03-06:00
+---
+
 <h1 align="center">
   <img src="docs/logo.png" alt="" width="80"><br>
   Portanote

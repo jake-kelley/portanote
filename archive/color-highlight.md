@@ -1,3 +1,11 @@
+---
+type: Archived Design Note
+title: Inline text color + highlighting (archived)
+description: Exact implementation of the shelved ==highlight== and inline-color editor feature, kept so it can be restored.
+tags: [archive, editor, markdown, ui]
+timestamp: 2026-07-03T17:02:14-06:00
+---
+
 # Archived: inline text color + highlighting
 
 Set aside on request ("archive for now"). This documents the exact implementation

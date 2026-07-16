@@ -1,6 +1,10 @@
 ---
 name: verify
+type: Agent Skill
+title: Verify Portanote changes
 description: Build and drive Portanote end-to-end to verify a change — launch the real binary against a scratch notes dir and exercise the HTTP API + on-disk layout.
+tags: [testing, verification, claude-code]
+timestamp: 2026-07-08T15:48:23-06:00
 ---
 
 # Verifying Portanote changes
