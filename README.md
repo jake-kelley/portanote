@@ -1,10 +1,10 @@
 ---
 type: Project Documentation
 title: Portanote
-description: A portable, single-binary Markdown notes app — why it exists, features, install and usage, Ask Claude, the MCP server, and how to build it.
+description: A portable, single-binary Markdown notes app — why it exists, features, install and usage, updates, Ask Claude, the MCP server, and how to build it.
 resource: https://github.com/jake-kelley/portanote
 tags: [notes, markdown, go, portable, self-hosted, mcp, claude]
-timestamp: 2026-07-15T22:09:03-06:00
+timestamp: 2026-07-15T23:05:00-06:00
 ---
 
 <h1 align="center">
@@ -35,13 +35,14 @@ timestamp: 2026-07-15T22:09:03-06:00
 - **Nested folders** — organize notes in a real `Work/Runbooks/AWS`-style tree, with drag-and-drop, subtree counts, and collapsible groups. Folders are real subdirectories of `notes/`, so your file manager, `grep`, and other editors see the same structure.
 - **Sync with disk** — the `⟳` button in the sidebar re-indexes the notes folder on demand, adopting files and folders you added, edited, or removed outside the app (file explorer, git, another editor) without a restart.
 - **Fast search with operators** — an in-memory full-text index (search-as-you-type), plus `tag:`, `folder:`, `is:starred` / `is:untagged` / `is:trashed`, `after:`, and `before:`.
-- **Auto-tag suggestions** — an offline pass over your note titles and headers proposes topic tags under the tag row; one click accepts. Nothing is sent anywhere.
+- **Auto-tag suggestions** — an offline pass over your note titles and headers proposes topic tags under the tag row; one click accepts. Nothing is sent anywhere. With the Claude CLI installed, an opt-in setting adds AI suggestions on demand, per note or across selected notes. [Details below](#tags--suggestions).
 - **A standalone To-Do list** — add / complete / reorder (drag) / delete tasks and clear completed ones. The `☑` button in a note's toolbar creates a task linked back to that note.
 - **Note templates** — a `templates/` folder of reusable skeletons (Meeting Notes, Runbook, Daily Log to start), from the `▾` beside the new-note button.
 - **Paste-to-attach** — paste a screenshot straight into a note; it's saved under `attachments/` and inserted as an image.
 - **PDF export, two ways** — a built-in "Print / Save as PDF" that works everywhere, and a true **Eisvogel** LaTeX export (optional portable tools) with a toggleable title page and table of contents.
 - **Automatic backups** — zips your whole notes folder on a schedule (default every 3 hours, keep the last 12), adjustable in the ⚙ settings with a "Back up now" button.
 - **Multi-select bulk actions** — Ctrl/Shift-click notes to move, star, or trash them together.
+- **In-app updates** — checks for a new release, verifies its checksum, installs it in place, and restarts. Points at this repo by default; aim it at your own fork or a self-managed GitLab instance in the settings. [Details below](#updating-from-your-own-repository).
 - **Built-in MCP server** — AI tools (Claude Code, Claude Desktop, and any other MCP client) can search, read, create, and edit your notes over the [Model Context Protocol](https://modelcontextprotocol.io) at `/mcp`. Same localhost-only privacy as the UI. [Details below](#mcp-server-connect-ai-tools).
 - **Ask Claude panel** — if the [Claude Code CLI](https://claude.com/claude-code) is installed on your machine, a `✳` button in the note toolbar opens a chat panel about the open note: summarize, improve, extract action items straight into the To-Do list, suggest tags, or ask anything. Uses your existing Claude login; Claude only gets Portanote's own note tools (no shell or file access). [Details below](#ask-claude-built-in-ai-optional).
 
@@ -57,6 +58,8 @@ Grab the binary for your machine from the **[Releases page](https://github.com/j
 | **macOS** (Apple Silicon / M-series) | [`portanote-macos-arm64`](https://github.com/jake-kelley/portanote/releases/latest/download/portanote-macos-arm64) |
 
 Once installed, Portanote keeps itself current: **⚙ Settings → Check for updates** fetches the latest release, verifies its checksum, swaps the binary in place, and restarts on the same port — notes, settings, and autostart launchers are untouched. Works on Windows and macOS. (If you make the repository private, set a `PORTANOTE_GITHUB_TOKEN` environment variable with a GitHub token so the updater can reach the releases API.)
+
+Updating from your own fork or an internal mirror is supported too — see [Updating from your own repository](#updating-from-your-own-repository).
 
 ### Windows
 
@@ -278,6 +281,23 @@ How it works and what it can touch: each message spawns a fresh headless `claude
 Notes: messages (and the notes Claude reads to answer them) are sent to Anthropic through your own Claude account, and usage counts against your plan. Each message starts a fresh conversation.
 
 **Settings & logs** (⚙ Settings → *Ask Claude*): Portanote auto-detects the `claude` executable and settings file at launch — checking your `PATH` first, then the usual install locations (`~/.local/bin`, Homebrew, …) so a background-launched instance on macOS still finds it. The settings fields are pre-filled with what was detected; point them at a specific binary or `--settings` file if you'd rather, or clear a field to go back to auto-detect. There's also an **Environment variables** box (one `KEY=VALUE` per line) that gets merged into the spawned `claude` — set `NODE_EXTRA_CA_CERTS=/path/to/root.crt` here to make Claude Code trust a corporate TLS-inspecting proxy (Zscaler and the like). Portanote also reads the `env` block from your `claude` settings file automatically and applies it to each turn, so vars you already keep there (proxy CAs, `CLAUDE_CODE_USE_VERTEX` and other routing) just work — even those Node needs set before startup, which a plain settings file can miss; the box overrides settings.json where they overlap, and the section lists what was auto-loaded. Below that, an activity log lists recent prompts and any errors (the exact CLI error is captured, so a "not logged in" or certificate problem shows up there). If the button doesn't appear, open that section to see what was detected — or run `claude` once in a terminal to log in, then restart Portanote.
+
+---
+
+## Updating from your own repository
+
+By default the updater pulls releases from this project's GitHub repo. If you run your own fork or an internal mirror — a self-managed GitLab instance, say — point **⚙ Settings → Updates → Update repository** at it:
+
+```
+https://gitlab.example.com/infra/portanote
+```
+
+Leave the field empty to use the default. The rest of Settings behaves the same; the check reports which host it reached.
+
+- **GitHub** (`github.com/owner/repo`) uses the GitHub releases API. Private repos read a token from `PORTANOTE_GITHUB_TOKEN` or `GITHUB_TOKEN`.
+- **Any other host** is treated as a **GitLab** instance and read through its `/api/v4` releases API (nested groups are fine). Private projects read a token from `PORTANOTE_GITLAB_TOKEN` or `GITLAB_TOKEN`, sent as `PRIVATE-TOKEN`. Tokens live in the environment, never in your settings file.
+
+Your releases need the same asset names this project publishes — `portanote-windows-amd64.exe`, `portanote-macos-arm64`, and a `sha256sums.txt` listing their digests (`scripts/build.ps1` produces the binaries). On GitLab, attach them as release asset links using exactly those names. The updater verifies every download against `sha256sums.txt` and refuses a release that doesn't ship one, wherever it came from.
 
 ---
 
