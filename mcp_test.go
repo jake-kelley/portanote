@@ -233,6 +233,42 @@ func TestMCPNoteRoundTrip(t *testing.T) {
 	}
 }
 
+func TestMCPRenameFolder(t *testing.T) {
+	h := newTestMCP(t)
+
+	var created Note
+	callTool(t, h, "create_note", `{"title":"In Old Folder","folder":"Work/Old"}`, &created)
+
+	var folders []FolderInfo
+	callTool(t, h, "rename_folder", `{"from":"Work/Old","to":"Work/New"}`, &folders)
+	names := map[string]bool{}
+	for _, f := range folders {
+		names[f.Name] = true
+	}
+	if !names["Work/New"] || names["Work/Old"] {
+		t.Fatalf("folders after rename: %+v", folders)
+	}
+
+	var read struct {
+		Note Note `json:"note"`
+	}
+	callTool(t, h, "read_note", `{"id":"`+created.ID+`"}`, &read)
+	if read.Note.Folder != "Work/New" {
+		t.Fatalf("note folder = %q, want Work/New", read.Note.Folder)
+	}
+
+	// renaming a folder that doesn't exist surfaces as a tool error
+	res := callTool(t, h, "rename_folder", `{"from":"Nope","to":"Other"}`, nil)
+	if !res.IsError {
+		t.Error("rename of missing folder should set isError")
+	}
+	// missing arguments too
+	res = callTool(t, h, "rename_folder", `{"from":"Work/New"}`, nil)
+	if !res.IsError {
+		t.Error("rename without to should set isError")
+	}
+}
+
 func TestMCPTaskTools(t *testing.T) {
 	h := newTestMCP(t)
 

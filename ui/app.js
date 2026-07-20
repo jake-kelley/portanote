@@ -371,6 +371,7 @@ function renderSidebar() {
       return `<a data-folder="${esc(r.path)}" class="frow ${state.folder === r.path ? "active" : ""}" style="padding-left:${8 + r.depth * 14}px">
         ${toggle}<span class="ficon">📁</span><span class="fname">${esc(r.name)}</span>
         <span class="count">${r.count || ""}</span>
+        <span class="fren" data-ren="${esc(r.path)}" title="Rename folder">✎</span>
         <span class="fadd" data-add="${esc(r.path)}" title="Add subfolder">＋</span>
         <span class="folder-x" data-del="${esc(r.path)}" title="Delete folder">✕</span></a>`;
     }).join("");
@@ -1689,6 +1690,8 @@ function bindEvents() {
     if (tog) { e.stopPropagation(); toggleFolder(tog.dataset.toggle); return; }
     const add = e.target.closest("[data-add]");
     if (add) { e.stopPropagation(); createFolderFlow(false, add.dataset.add); return; }
+    const ren = e.target.closest("[data-ren]");
+    if (ren) { e.stopPropagation(); renameFolder(ren.dataset.ren); return; }
     const del = e.target.closest("[data-del]");
     if (del) { e.stopPropagation(); deleteFolder(del.dataset.del); return; }
     const a = e.target.closest("a[data-folder]");

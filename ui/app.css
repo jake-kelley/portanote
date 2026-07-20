@@ -57,6 +57,10 @@ input,select,textarea{font:inherit;color:inherit;}
   color:var(--muted);opacity:0;flex:none;}
 #folderlist a:hover .fadd{opacity:1;}
 .fadd:hover{background:var(--accent);color:#fff;}
+.fren{font-size:11px;width:16px;height:16px;line-height:15px;text-align:center;border-radius:50%;
+  color:var(--muted);opacity:0;flex:none;}
+#folderlist a:hover .fren{opacity:1;}
+.fren:hover{background:var(--accent);color:#fff;}
 .folder-x{font-size:11px;width:16px;height:16px;line-height:14px;text-align:center;
   border-radius:50%;color:var(--muted);opacity:0;flex:none;}
 #folderlist a:hover .folder-x{opacity:1;}

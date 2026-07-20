@@ -439,6 +439,33 @@ var mcpTools = []mcpTool{
 		},
 	},
 	{
+		name: "rename_folder",
+		description: "Rename or move a folder. Both arguments are full \"/\"-separated paths: " +
+			"\"Work/Old\" -> \"Work/New\" renames in place, \"Work/Old\" -> \"Archive/Old\" moves the " +
+			"whole subtree under a new parent (created if missing). Notes move with the folder and keep " +
+			"their ids. Returns the updated folder list.",
+		inputSchema: schema(map[string]any{
+			"from": prop("string", "Current folder path, e.g. \"Work/Runbooks\"."),
+			"to":   prop("string", "New folder path, e.g. \"Work/Playbooks\"."),
+		}, "from", "to"),
+		run: func(s *Store, args json.RawMessage) (any, error) {
+			var a struct {
+				From string `json:"from"`
+				To   string `json:"to"`
+			}
+			if err := json.Unmarshal(args, &a); err != nil {
+				return nil, errors.New("invalid arguments: " + err.Error())
+			}
+			if strings.TrimSpace(a.From) == "" || strings.TrimSpace(a.To) == "" {
+				return nil, errors.New("from and to are required")
+			}
+			if err := s.RenameFolder(a.From, a.To); err != nil {
+				return nil, err
+			}
+			return s.Folders(), nil
+		},
+	},
+	{
 		name: "rescan_notes",
 		description: "Rescan the notes directory and rebuild the index — picks up Markdown files and " +
 			"folders added, edited, or removed outside Portanote (file explorer, git, another editor). " +
