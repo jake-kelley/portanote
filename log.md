@@ -2,6 +2,7 @@
 
 Release history, newest first. Full diffs live in the [GitHub releases](https://github.com/jake-kelley/portanote/releases).
 
+- **2026-07-20 — v1.6.7**: folder rename in the sidebar (pencil button; double-click still works) and a rename_folder MCP tool that renames or moves whole subtrees.
 - **2026-07-15 — v1.6.6**: frontmatter Portanote doesn't own is preserved on save; block-form (Obsidian-style) tags are read instead of emptied.
 - **2026-07-15 — v1.6.5**: configurable update repository — pull releases from your own fork or a self-managed GitLab instance.
 - **2026-07-15 — v1.6.4**: opt-in AI tag suggestions via the claude CLI; documentation restructured as an OKF bundle.
