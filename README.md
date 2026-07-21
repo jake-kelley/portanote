@@ -39,30 +39,26 @@ timestamp: 2026-07-20T14:00:00-06:00
 
 ## Get started
 
-**1. Download** the binary for your machine from the **[latest release](https://github.com/jake-kelley/portanote/releases/latest)**: [`portanote-windows-amd64.exe`](https://github.com/jake-kelley/portanote/releases/latest/download/portanote-windows-amd64.exe) (Windows) · [`portanote-macos-arm64`](https://github.com/jake-kelley/portanote/releases/latest/download/portanote-macos-arm64) (macOS, Apple Silicon).
-
-**2. Run the setup one-liner** in a terminal, from the folder you downloaded it to:
+One command installs everything — it downloads the latest release, verifies its sha256 checksum, deploys to `Documents/portanote/`, starts the app, and sets it to start quietly at every login:
 
 ```powershell
 # Windows (PowerShell)
-cd ~\Downloads
-iwr -useb https://raw.githubusercontent.com/jake-kelley/portanote/main/scripts/autostart.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/jake-kelley/portanote/main/scripts/install.ps1 | iex
 ```
 
 ```sh
-# macOS (Terminal)
-cd ~/Downloads
-curl -fsSL https://raw.githubusercontent.com/jake-kelley/portanote/main/scripts/autostart.sh | sh
+# macOS (Terminal, Apple Silicon)
+curl -fsSL https://raw.githubusercontent.com/jake-kelley/portanote/main/scripts/install.sh | sh
 ```
 
-That's it. Portanote moves into `Documents/portanote/`, starts (your browser opens `http://127.0.0.1:8737` — bookmark it), and from now on starts quietly in the background at every login. Your notes live in `Documents/portanote/notes/`. Autostart is undoable anytime (`-Uninstall` / `--uninstall`) and every step is detected or overridable — [docs/autostart.md](docs/autostart.md) has the details.
+Your browser opens `http://127.0.0.1:8737` — bookmark it. Notes live in `Documents/portanote/notes/`. Already downloaded a binary? Run the command from its folder and that binary is used instead. Autostart is undoable anytime (`-Uninstall` / `--uninstall`) and every step is detected or overridable — [docs/autostart.md](docs/autostart.md) has the details.
 
 ### Prefer to run it by hand?
 
-The binary is fully portable — no setup, run it from anywhere (USB stick included) and a `notes/` folder appears next to it:
+The binary is fully portable — no setup, run it from anywhere (USB stick included) and a `notes/` folder appears next to it. Download it from the **[latest release](https://github.com/jake-kelley/portanote/releases/latest)**:
 
-- **Windows:** double-click the exe; your browser opens `http://127.0.0.1:8737`. If SmartScreen warns: **More info → Run anyway** (it's an unsigned binary, not malware).
-- **macOS:** in Terminal, in the binary's folder: `chmod +x portanote-macos-arm64 && xattr -d com.apple.quarantine portanote-macos-arm64 && ./portanote-macos-arm64`. If Gatekeeper objects: **System Settings → Privacy & Security → Open Anyway**.
+- **Windows:** double-click [`portanote-windows-amd64.exe`](https://github.com/jake-kelley/portanote/releases/latest/download/portanote-windows-amd64.exe); your browser opens `http://127.0.0.1:8737`. If SmartScreen warns: **More info → Run anyway** (it's an unsigned binary, not malware).
+- **macOS:** download [`portanote-macos-arm64`](https://github.com/jake-kelley/portanote/releases/latest/download/portanote-macos-arm64), then in Terminal, in the binary's folder: `chmod +x portanote-macos-arm64 && xattr -d com.apple.quarantine portanote-macos-arm64 && ./portanote-macos-arm64`. If Gatekeeper objects: **System Settings → Privacy & Security → Open Anyway**.
 
 ### After that
 
