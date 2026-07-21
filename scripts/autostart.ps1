@@ -24,6 +24,8 @@ param(
     [string]$NotesDir = '',
     # Don't copy anything; run the binary from where it is now.
     [switch]$InPlace,
+    # Don't start Portanote (or open the browser) after installing.
+    [switch]$NoStart,
     # Remove the launcher from the Startup folder instead of installing it.
     [switch]$Uninstall,
     # Override the Startup folder (mainly for testing).
@@ -79,6 +81,8 @@ if (-not $InPlace -and $srcDir.TrimEnd('\') -ine $Dest.TrimEnd('\')) {
         throw "Could not copy the binary to $target - if Portanote is running from there, stop it first (Task Manager). ($_)"
     }
     $copied += (Split-Path $Binary -Leaf)
+    # clear mark-of-the-web so SmartScreen doesn't block the background launch
+    Unblock-File $target -ErrorAction SilentlyContinue
     # bring along notes/tools sitting next to the downloaded binary, but never
     # overwrite ones already deployed
     foreach ($d in @('notes', 'tools')) {
@@ -109,6 +113,16 @@ Write-Host "Installed $launcher"
 Write-Host "  binary: $Binary"
 Write-Host "  notes:  $NotesDir"
 Write-Host ""
-Write-Host "Portanote will start hidden at your next login - bookmark http://127.0.0.1:8737"
-Write-Host "To start it right now, double-click the exe in $Dest."
+
+if ($NoStart) {
+    Write-Host "Portanote will start hidden at your next login - bookmark http://127.0.0.1:8737"
+} else {
+    $name = [System.IO.Path]::GetFileNameWithoutExtension($Binary)
+    if (-not (Get-Process $name -ErrorAction SilentlyContinue)) {
+        Start-Process wscript.exe -ArgumentList ('"' + $launcher + '"')
+        Start-Sleep -Seconds 2
+    }
+    Start-Process "http://127.0.0.1:8737"
+    Write-Host "Portanote is running now and will start at every login - bookmark http://127.0.0.1:8737"
+}
 Write-Host "Undo autostart anytime:  powershell -ExecutionPolicy Bypass -File autostart.ps1 -Uninstall"

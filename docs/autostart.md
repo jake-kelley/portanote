@@ -25,9 +25,11 @@ iwr -useb https://raw.githubusercontent.com/jake-kelley/portanote/main/scripts/a
 ```
 
 ```sh
-# macOS (starts Portanote immediately, too)
+# macOS
 curl -fsSL https://raw.githubusercontent.com/jake-kelley/portanote/main/scripts/autostart.sh | sh
 ```
+
+Both start Portanote immediately as well (the Windows script opens your browser; pass `-NoStart` to skip that).
 
 (In a repo checkout: `powershell -ExecutionPolicy Bypass -File scripts\autostart.ps1` / `sh scripts/autostart.sh`. Both scripts are also attached to each [release](https://github.com/jake-kelley/portanote/releases/latest).)
 
