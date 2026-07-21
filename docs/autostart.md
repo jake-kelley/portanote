@@ -8,25 +8,30 @@ timestamp: 2026-07-20T14:00:00-06:00
 
 # Start Portanote at login
 
-Running the binary normally keeps a console window open. To have Portanote start at login and run quietly in the background, use the setup script for your OS — it detects the binary, your username/home folder, and the notes folder, and installs a background launcher. Bookmark `http://127.0.0.1:8737` to open the app.
+Running the binary normally keeps a console window open. The setup script for your OS gives Portanote a permanent home and makes it start quietly in the background at every login. It detects everything it needs — the downloaded binary, your username/home folder, the notes folder — and does two things:
+
+1. **Deploys the app to your Documents folder** — `Documents\portanote\` on Windows, `~/Documents/portanote/` on macOS. The binary is copied there, along with any `notes/` or `tools/` folder sitting next to it (existing deployed folders are never overwritten, so re-running after an upgrade only refreshes the binary).
+2. **Installs a background launcher** pointing there — a hidden Startup-folder launcher on Windows, a LaunchAgent on macOS.
+
+Bookmark `http://127.0.0.1:8737` to open the app.
 
 ## The easy way: one script
 
-Run it **from the folder that holds the portanote binary**:
+Run it **from the folder that holds the downloaded portanote binary** (your Downloads folder, typically):
 
 ```powershell
-# Windows — installs a hidden launcher in your Startup folder
+# Windows
 iwr -useb https://raw.githubusercontent.com/jake-kelley/portanote/main/scripts/autostart.ps1 | iex
 ```
 
 ```sh
-# macOS — installs a LaunchAgent (starts now, and at every login)
+# macOS (starts Portanote immediately, too)
 curl -fsSL https://raw.githubusercontent.com/jake-kelley/portanote/main/scripts/autostart.sh | sh
 ```
 
 (In a repo checkout: `powershell -ExecutionPolicy Bypass -File scripts\autostart.ps1` / `sh scripts/autostart.sh`. Both scripts are also attached to each [release](https://github.com/jake-kelley/portanote/releases/latest).)
 
-To undo it:
+To undo autostart (the deployed folder with your notes is left alone):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File autostart.ps1 -Uninstall   # Windows (download the script first)
@@ -36,9 +41,12 @@ powershell -ExecutionPolicy Bypass -File autostart.ps1 -Uninstall   # Windows (d
 sh autostart.sh --uninstall                                          # macOS
 ```
 
-Options: `-Binary` / `-NotesDir` on Windows, or a notes-dir argument on macOS (`sh autostart.sh /path/to/notes`), override the detection.
+Options that override the detection:
 
-Prefer to see exactly what gets installed? The manual steps below are what the scripts automate.
+- **Windows:** `-Binary <exe>`, `-Dest <folder>` (instead of `Documents\portanote`), `-NotesDir <folder>`, `-InPlace` (don't copy anything; run the binary from where it is).
+- **macOS:** `--in-place` (don't copy), or a notes-dir argument: `sh autostart.sh /path/to/notes`.
+
+Prefer to see exactly what gets installed? The manual steps below are what the scripts automate (minus the copy to Documents).
 
 ## Windows — hidden launcher in the Startup folder
 
