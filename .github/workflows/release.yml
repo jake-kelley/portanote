@@ -37,4 +37,6 @@ jobs:
             sha256sums.txt
             scripts/get-tools.ps1
             scripts/get-tools.sh
+            scripts/autostart.ps1
+            scripts/autostart.sh
           generate_release_notes: true

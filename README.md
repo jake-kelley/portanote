@@ -63,7 +63,7 @@ Download the binary for your machine from the **[latest release](https://github.
 ### After that
 
 - **Stay current:** **⚙ Settings → Check for updates** downloads the new release, verifies its checksum, swaps the binary in place, and restarts — notes and settings untouched. (You can also [update from your own fork or GitLab](docs/custom-updates.md).)
-- **Start at login, no console window:** see [docs/autostart.md](docs/autostart.md).
+- **Start at login, no console window:** one script sets it up (and `-Uninstall` undoes it) — see [docs/autostart.md](docs/autostart.md).
 - **Use it from your phone:** run with `-host subnet` and open the printed `http://<device-ip>:8737` on the same Wi-Fi. There's no password, so trusted networks only.
 
 Flags, all optional:

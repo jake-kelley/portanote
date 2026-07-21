@@ -8,7 +8,37 @@ timestamp: 2026-07-20T14:00:00-06:00
 
 # Start Portanote at login
 
-Running the binary normally keeps a console window open. To have Portanote start at login and run quietly in the background, use one of the launchers below with `-no-browser` (so it doesn't pop a browser every boot), and bookmark `http://127.0.0.1:8737`.
+Running the binary normally keeps a console window open. To have Portanote start at login and run quietly in the background, use the setup script for your OS — it detects the binary, your username/home folder, and the notes folder, and installs a background launcher. Bookmark `http://127.0.0.1:8737` to open the app.
+
+## The easy way: one script
+
+Run it **from the folder that holds the portanote binary**:
+
+```powershell
+# Windows — installs a hidden launcher in your Startup folder
+iwr -useb https://raw.githubusercontent.com/jake-kelley/portanote/main/scripts/autostart.ps1 | iex
+```
+
+```sh
+# macOS — installs a LaunchAgent (starts now, and at every login)
+curl -fsSL https://raw.githubusercontent.com/jake-kelley/portanote/main/scripts/autostart.sh | sh
+```
+
+(In a repo checkout: `powershell -ExecutionPolicy Bypass -File scripts\autostart.ps1` / `sh scripts/autostart.sh`. Both scripts are also attached to each [release](https://github.com/jake-kelley/portanote/releases/latest).)
+
+To undo it:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File autostart.ps1 -Uninstall   # Windows (download the script first)
+```
+
+```sh
+sh autostart.sh --uninstall                                          # macOS
+```
+
+Options: `-Binary` / `-NotesDir` on Windows, or a notes-dir argument on macOS (`sh autostart.sh /path/to/notes`), override the detection.
+
+Prefer to see exactly what gets installed? The manual steps below are what the scripts automate.
 
 ## Windows — hidden launcher in the Startup folder
 
