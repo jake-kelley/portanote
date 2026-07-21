@@ -1,9 +1,13 @@
 # Downloads portable pandoc + tectonic into .\tools\ (no installation).
-# These enable the true Eisvogel PDF export. Run from the portanote folder:
+# These enable the true Eisvogel PDF export.
+#
+# Run it FROM THE FOLDER THAT HOLDS THE PORTANOTE BINARY (repo root works too):
 #   powershell -ExecutionPolicy Bypass -File scripts\get-tools.ps1
+# or with no repo checkout at all:
+#   iwr -useb https://raw.githubusercontent.com/jake-kelley/portanote/main/scripts/get-tools.ps1 | iex
 
 $ErrorActionPreference = "Stop"
-$root = Split-Path -Parent $PSScriptRoot
+$root = (Get-Location).Path
 $tools = Join-Path $root "tools"
 New-Item -ItemType Directory -Force $tools | Out-Null
 $tmp = Join-Path $env:TEMP "portanote-tools"

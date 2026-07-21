@@ -1,10 +1,14 @@
 #!/bin/sh
 # Downloads portable pandoc + tectonic into ./tools/ (no installation).
-# These enable the true Eisvogel PDF export. Run from the portanote folder:
+# These enable the true Eisvogel PDF export.
+#
+# Run it FROM THE FOLDER THAT HOLDS THE PORTANOTE BINARY (repo root works too):
 #   sh scripts/get-tools.sh
+# or with no repo checkout at all:
+#   curl -fsSL https://raw.githubusercontent.com/jake-kelley/portanote/main/scripts/get-tools.sh | sh
 set -e
 
-root="$(cd "$(dirname "$0")/.." && pwd)"
+root="$(pwd)"
 tools="$root/tools"
 tmp="$(mktemp -d)"
 mkdir -p "$tools"
