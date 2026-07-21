@@ -35,4 +35,6 @@ jobs:
             portanote-windows-amd64.exe
             portanote-macos-arm64
             sha256sums.txt
+            scripts/get-tools.ps1
+            scripts/get-tools.sh
           generate_release_notes: true

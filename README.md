@@ -89,7 +89,7 @@ iwr -useb https://raw.githubusercontent.com/jake-kelley/portanote/main/scripts/g
 curl -fsSL https://raw.githubusercontent.com/jake-kelley/portanote/main/scripts/get-tools.sh | sh
 ```
 
-The sidebar badge flips to **PDF: eisvogel** and the Eisvogel export options enable. The first export downloads ~100 MB of LaTeX packages into `tools/tectonic-cache/` and takes a few minutes; after that it's fast and works offline.
+(Both scripts are also attached to each [release](https://github.com/jake-kelley/portanote/releases/latest) if you'd rather download than pipe from the web.) The sidebar badge flips to **PDF: eisvogel** and the Eisvogel export options enable. The first export downloads ~100 MB of LaTeX packages into `tools/tectonic-cache/` and takes a few minutes; after that it's fast and works offline.
 
 ## Everyday use
 
