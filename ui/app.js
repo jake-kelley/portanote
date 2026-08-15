@@ -32,6 +32,8 @@ const state = {
   claudeOpen: localStorage.getItem("pn-claude-open") === "1",  // Ask Claude drawer
   claudeStreaming: false,   // a turn is in flight
   claudeStopRequested: false,
+  claudeFolder: null,       // folder the visible thread belongs to (null = none yet)
+  claudeReset: false,       // ask the backend for a new conversation on the next turn
   claudeAtBottom: true,     // auto-scroll the thread unless the user scrolled up
   aiTags: null,             // {id, tags} — last AI tag suggestions; override the built-in ones
   aiTagsBusy: false,        // a per-note or bulk AI tag run is in flight
@@ -431,6 +433,7 @@ function renderList() {
 
 function renderEditor() {
   const n = state.current;
+  claudeNoteChanged();            // folder switch ends one conversation, starts another
   $("#emptyState").style.display = n ? "none" : "";
   $("#editorMain").hidden = !n;
   renderClaudeUI();
@@ -1394,8 +1397,11 @@ async function exportEisvogel() {
 
 /* ---------------------------------------------------------------- ask claude */
 /* Right-hand drawer that talks to the local Claude Code CLI through the
-   /api/claude endpoints. Phase 1: each message is an independent invocation
-   (no memory of prior messages); the thread is kept client-side only. */
+   /api/claude endpoints. Each message is its own CLI process, but the backend
+   resumes the same conversation so context carries turn to turn. That
+   conversation is scoped to the open note's folder: siblings share it, a note
+   in another folder gets its own. The visible thread is client-side only and
+   follows the same folder rule — see claudeNoteChanged. */
 
 // canned prompts for the quick-action chips
 const CLAUDE_QUICK = {
@@ -1423,10 +1429,26 @@ function claudeTogglePanel() {
   if (!$("#claudePanel").hidden) $("#claudeInput").focus();
 }
 
-// empty the visual thread (client-side only)
+// empty the visual thread and drop the backend conversation with it, so the
+// next turn genuinely starts over instead of Claude remembering what the user
+// just wiped off the screen
 function claudeClearThread() {
   if (state.claudeStreaming) return;
   $("#claudeThread").innerHTML = CLAUDE_EMPTY;
+  state.claudeReset = true;
+}
+
+// Conversations are scoped to a folder: notes in the same folder keep rolling
+// context, a note in a different folder starts its own. The backend keys the
+// session the same way — this only keeps the visible thread honest about it.
+function claudeNoteChanged() {
+  const folder = state.current ? (state.current.folder || "") : null;
+  if (folder === null || folder === state.claudeFolder) return;
+  const had = state.claudeFolder !== null && !$("#claudeThread").querySelector(".cl-empty");
+  state.claudeFolder = folder;
+  if (state.claudeStreaming) return;
+  $("#claudeThread").innerHTML = CLAUDE_EMPTY;
+  if (had) claudeAppendMessage("cl-system", "New folder — starting a fresh conversation.");
 }
 
 // append a message to the thread and return its element (html must be safe)
@@ -1558,9 +1580,12 @@ async function claudeSend(message) {
   };
 
   try {
+    const body = { noteId, message };
+    if (selection) body.selection = selection;
+    if (state.claudeReset) { body.reset = true; state.claudeReset = false; }
     const r = await fetch("/api/claude/chat", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(selection ? { noteId, message, selection } : { noteId, message }),
+      body: JSON.stringify(body),
     });
     if (!r.ok) {                                  // plain JSON: 409 turn running, 503 not installed
       const err = await r.json().catch(() => ({}));
@@ -2010,6 +2035,7 @@ async function onFolderSelect(e) {
     state.current.folder = val;
   }
   await saveNow();
+  claudeNoteChanged();            // moving the open note across folders switches conversation too
   renderSidebar();
   renderList();
   renderFolderSelect();

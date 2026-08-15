@@ -100,6 +100,7 @@ func claudeChatHandler(store *Store) http.HandlerFunc {
 			NoteID    string           `json:"noteId"`
 			Message   string           `json:"message"`
 			Selection *claudeSelection `json:"selection"`
+			Reset     bool             `json:"reset"` // user cleared the thread: start a new conversation
 		}
 		json.NewDecoder(r.Body).Decode(&req)
 		if strings.TrimSpace(req.Message) == "" {
@@ -146,10 +147,36 @@ func claudeChatHandler(store *Store) http.HandlerFunc {
 			}
 		}
 
+		// the conversation is scoped to the note's folder, so notes in one
+		// folder share context and a different folder gets its own thread. A
+		// note-less turn is only reachable through the API — the drawer needs
+		// an open note — and stays stateless rather than claiming root's.
+		folder, scoped := "", note != nil
+		if scoped {
+			folder = note.Folder
+			if req.Reset {
+				claudeSessionDrop(folder)
+			}
+		}
+		resume := ""
+		if scoped {
+			resume = claudeSessionFor(folder)
+		}
+
+		sysPrompt := claudeContextPrompt(note, req.Selection)
+		onText := func(text string) { emit(sseEvent{Type: "delta", Text: text}) }
+
 		start := time.Now()
-		err := runClaude(r.Context(), store.dir, req.Message, claudeContextPrompt(note, req.Selection), func(text string) {
-			emit(sseEvent{Type: "delta", Text: text})
-		})
+		sid, err := runClaude(r.Context(), store.dir, req.Message, sysPrompt, resume, onText)
+		if errors.Is(err, errSessionGone) {
+			// the stored id aged out of the CLI's transcript store; it bailed
+			// before streaming anything, so a fresh retry cannot double-print
+			claudeSessionDrop(folder)
+			sid, err = runClaude(r.Context(), store.dir, req.Message, sysPrompt, "", onText)
+		}
+		if scoped && err == nil {
+			claudeSessionRecord(folder, sid)
+		}
 		logClaudeTurn(note, req.Selection, req.Message, start, err)
 		if err != nil {
 			emit(sseEvent{Type: "error", Error: err.Error()})
@@ -216,9 +243,17 @@ func claudeContextPrompt(n *Note, sel *claudeSelection) string {
 	return prompt
 }
 
-// runClaude spawns one headless CLI turn and forwards its text deltas. A var
-// so tests can fake the spawn; the SSE framing above is what's under test.
-var runClaude = func(ctx context.Context, dir, message, sysPrompt string, emit func(string)) error {
+// errSessionGone means the id we tried to --resume is no longer on disk: the
+// CLI prunes transcripts older than cleanupPeriodDays (30 by default), so a
+// stored id has a shelf life. It exits before streaming anything, which is
+// what makes retrying the turn fresh safe.
+var errSessionGone = errors.New("claude session no longer exists")
+
+// runClaude spawns one headless CLI turn and forwards its text deltas, then
+// reports the conversation id the CLI used so the caller can resume it next
+// turn. resumeID continues an existing conversation; "" starts a new one. A
+// var so tests can fake the spawn; the SSE framing above is what's under test.
+var runClaude = func(ctx context.Context, dir, message, sysPrompt, resumeID string, emit func(string)) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	// inline JSON is a single argv entry — no shell, no quoting issues
@@ -233,6 +268,9 @@ var runClaude = func(ctx context.Context, dir, message, sysPrompt string, emit f
 		"--permission-mode", "dontAsk", // blocked tools fail fast instead of prompting
 		"--append-system-prompt", sysPrompt,
 	}
+	if resumeID != "" { // carry the folder's conversation into this turn
+		args = append(args, "--resume", resumeID)
+	}
 	if s := claudeSettingsArg(); s != "" { // only when the user set a custom settings file
 		args = append(args, "--settings", s)
 	}
@@ -245,10 +283,10 @@ var runClaude = func(ctx context.Context, dir, message, sysPrompt string, emit f
 	cmd.Stderr = stderr
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return err
+		return "", err
 	}
 	if err := cmd.Start(); err != nil {
-		return err
+		return "", err
 	}
 	claudeTurn.Lock()
 	claudeTurn.cmd = cmd
@@ -262,26 +300,35 @@ var runClaude = func(ctx context.Context, dir, message, sysPrompt string, emit f
 	claudeTurn.Unlock()
 	switch {
 	case stopped:
-		return errors.New("stopped")
+		return res.sessionID, errors.New("stopped")
 	case ctx.Err() == context.DeadlineExceeded:
-		return errors.New("claude took longer than 5 minutes and was stopped")
+		return res.sessionID, errors.New("claude took longer than 5 minutes and was stopped")
 	case res.sawResult && res.isError:
-		if res.text == "" {
-			return errors.New("claude reported an error")
+		if resumeID != "" && sessionMissing(res.errs) {
+			return "", errSessionGone
 		}
-		return errors.New(res.text)
+		if res.text == "" {
+			if res.errs != "" {
+				return res.sessionID, errors.New(res.errs)
+			}
+			return res.sessionID, errors.New("claude reported an error")
+		}
+		return res.sessionID, errors.New(res.text)
 	case res.sawResult:
-		return nil
+		return res.sessionID, nil
 	default:
 		// died without a result line: the reason is on stderr (e.g. not logged in)
 		msg := strings.TrimSpace(stderr.String())
+		if resumeID != "" && sessionMissing(msg) {
+			return "", errSessionGone
+		}
 		if msg == "" && waitErr != nil {
 			msg = waitErr.Error()
 		}
 		if msg == "" {
 			msg = "claude exited without a result"
 		}
-		return errors.New(msg)
+		return res.sessionID, errors.New(msg)
 	}
 }
 
@@ -290,6 +337,16 @@ type claudeResult struct {
 	sawResult bool
 	isError   bool
 	text      string // the "result" field of the terminal line
+	sessionID string // the conversation this turn ran in, for --resume next turn
+	errs      string // the terminal line's "errors" array, joined
+}
+
+// sessionMissing spots a --resume against a transcript the CLI has already
+// pruned. It surfaces in two shapes depending on how far the run got: a
+// stream-json turn reports it in the result frame's "errors" array, an early
+// exit only writes it to stderr. Match either.
+func sessionMissing(s string) bool {
+	return strings.Contains(s, "No conversation found with session ID")
 }
 
 // parseClaudeStream reads the CLI's newline-delimited stream-json output,
@@ -314,11 +371,18 @@ func parseClaudeStream(r io.Reader, emit func(string)) claudeResult {
 					Text string `json:"text"`
 				} `json:"delta"`
 			} `json:"event"`
-			IsError bool   `json:"is_error"`
-			Result  string `json:"result"`
+			IsError   bool     `json:"is_error"`
+			Result    string   `json:"result"`
+			SessionID string   `json:"session_id"`
+			Errors    []string `json:"errors"`
 		}
 		if json.Unmarshal(line, &msg) != nil {
 			continue
+		}
+		// every frame carries the same session_id — take the first one seen so
+		// the caller can resume this conversation even if the turn later fails
+		if res.sessionID == "" {
+			res.sessionID = msg.SessionID
 		}
 		switch msg.Type {
 		case "stream_event":
@@ -328,6 +392,7 @@ func parseClaudeStream(r io.Reader, emit func(string)) claudeResult {
 			}
 		case "result":
 			res.sawResult, res.isError, res.text = true, msg.IsError, msg.Result
+			res.errs = strings.Join(msg.Errors, "; ")
 		}
 	}
 	// a CLI that streamed nothing (older version, changed flags) still ends

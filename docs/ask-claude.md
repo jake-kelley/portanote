@@ -23,7 +23,9 @@ If the [Claude Code CLI](https://claude.com/claude-code) is installed and logged
 
 Each message spawns a fresh headless `claude` process that connects back to this Portanote instance over localhost. It is restricted to Portanote's note/task tools — **no shell, no file access, no web**. Anything it changes goes through the same store as the UI, so edits are indexed instantly and "deleting" is only ever the recoverable trash. Your editor autosaves before each message and locks while Claude works; the note and To-Do list refresh when it finishes.
 
-**Privacy & cost:** messages (and the notes Claude reads to answer them) are sent to Anthropic through your own Claude account, and usage counts against your plan. Each message starts a fresh conversation.
+**Conversations follow the folder.** Although every message is its own process, the panel resumes the previous conversation, so follow-ups like "now make it shorter" work. That conversation belongs to the open note's *folder*: switching between notes in the same folder keeps the thread going, and opening a note in a different folder starts a separate one. Conversations never cross folders, and each folder's picks up where it left off when you come back. Clearing the thread with 🗑 starts genuinely fresh rather than just hiding the messages. Claude Code removes its own stored conversations after 30 days by default (`cleanupPeriodDays`); when that happens Portanote quietly begins a new one.
+
+**Privacy & cost:** messages (and the notes Claude reads to answer them) are sent to Anthropic through your own Claude account, and usage counts against your plan. Because a folder's conversation carries forward, later messages in a long thread cost more than the first.
 
 ## Settings & troubleshooting (⚙ Settings → Ask Claude)
 

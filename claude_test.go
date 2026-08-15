@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -98,7 +99,7 @@ func TestParseClaudeStreamGarbage(t *testing.T) {
 // ---------------------------------------------------------------- endpoint
 
 // stubClaude overrides CLI discovery (and optionally the spawn seam) for one test.
-func stubClaude(t *testing.T, path string, run func(context.Context, string, string, string, func(string)) error) {
+func stubClaude(t *testing.T, path string, run func(context.Context, string, string, string, string, func(string)) (string, error)) {
 	t.Helper()
 	oldPath, oldRun := claudePath, runClaude
 	claudePath = func() string { return path }
@@ -156,9 +157,9 @@ func TestClaudeChatNotInstalled(t *testing.T) {
 }
 
 func TestClaudeChatValidation(t *testing.T) {
-	stubClaude(t, "claude", func(context.Context, string, string, string, func(string)) error {
+	stubClaude(t, "claude", func(context.Context, string, string, string, string, func(string)) (string, error) {
 		t.Error("runClaude should not be reached")
-		return nil
+		return "", nil
 	})
 	h := claudeChatHandler(newClaudeTestStore(t))
 	if rec := postChat(t, h, `{}`); rec.Code != http.StatusBadRequest {
@@ -187,11 +188,11 @@ func TestClaudeChatBusy(t *testing.T) {
 
 func TestClaudeChatStream(t *testing.T) {
 	var gotPrompt string
-	stubClaude(t, "claude", func(ctx context.Context, dir, msg, sysPrompt string, emit func(string)) error {
+	stubClaude(t, "claude", func(ctx context.Context, dir, msg, sysPrompt, resumeID string, emit func(string)) (string, error) {
 		gotPrompt = sysPrompt
 		emit("Hello ")
 		emit("world")
-		return nil
+		return "sess-1", nil
 	})
 	store := newClaudeTestStore(t)
 	n, err := store.Create("Stream Test")
@@ -222,9 +223,9 @@ func TestClaudeChatStream(t *testing.T) {
 }
 
 func TestClaudeChatStreamError(t *testing.T) {
-	stubClaude(t, "claude", func(ctx context.Context, dir, msg, sysPrompt string, emit func(string)) error {
+	stubClaude(t, "claude", func(ctx context.Context, dir, msg, sysPrompt, resumeID string, emit func(string)) (string, error) {
 		emit("partial")
-		return errors.New("boom")
+		return "", errors.New("boom")
 	})
 	rec := postChat(t, claudeChatHandler(newClaudeTestStore(t)), `{"message":"hi"}`)
 	evs := sseEvents(t, rec.Body.String())
@@ -284,10 +285,10 @@ func TestClaudeContextPromptSelection(t *testing.T) {
 
 func TestClaudeChatPassesSelection(t *testing.T) {
 	var gotPrompt string
-	stubClaude(t, "claude-fake", func(ctx context.Context, dir, msg, sys string, emit func(string)) error {
+	stubClaude(t, "claude-fake", func(ctx context.Context, dir, msg, sys, resumeID string, emit func(string)) (string, error) {
 		gotPrompt = sys
 		emit("ok")
-		return nil
+		return "sess-1", nil
 	})
 	store := newClaudeTestStore(t)
 	n, err := store.Create("Sel Note")
@@ -444,12 +445,12 @@ func TestClaudeLogCapAndOrder(t *testing.T) {
 func TestClaudeChatRecordsLog(t *testing.T) {
 	dir := t.TempDir()
 	loadClaudeConfig(dir)
-	stubClaude(t, "claude-fake", func(ctx context.Context, d, msg, sys string, emit func(string)) error {
+	stubClaude(t, "claude-fake", func(ctx context.Context, d, msg, sys, resumeID string, emit func(string)) (string, error) {
 		if msg == "boom" {
-			return errors.New("kaboom")
+			return "", errors.New("kaboom")
 		}
 		emit("ok")
-		return nil
+		return "sess-1", nil
 	})
 	store := newClaudeTestStore(t)
 	h := newAPI(store, fstest.MapFS{})
@@ -562,5 +563,163 @@ func TestClaudeSpawnEnvMergesSettingsThenBox(t *testing.T) {
 	}
 	if lastFoo != "FOO=box" {
 		t.Errorf("box should override settings.json: last FOO = %q", lastFoo)
+	}
+}
+
+// ------------------------------------------------- folder-scoped sessions
+
+// sessionProbe records the resume id each turn was given and hands back the id
+// the fake CLI "ran in": a resumed turn reports the same id, a fresh one mints
+// a new one, which is what the real CLI does.
+type sessionProbe struct {
+	resumes []string // resume id seen per turn ("" = fresh)
+	mint    string   // id a fresh turn should report
+	gone    bool     // next resumed turn fails as if the transcript aged out
+}
+
+func (p *sessionProbe) run(_ context.Context, _, _, _, resumeID string, emit func(string)) (string, error) {
+	p.resumes = append(p.resumes, resumeID)
+	if resumeID != "" {
+		if p.gone {
+			p.gone = false
+			return "", errSessionGone
+		}
+		emit("ok")
+		return resumeID, nil
+	}
+	emit("ok")
+	return p.mint, nil
+}
+
+// noteInFolder makes a note and files it, so chat turns have a folder to scope to.
+func noteInFolder(t *testing.T, store *Store, title, folder string) *Note {
+	t.Helper()
+	n, err := store.Create(title)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Update(n.ID, UpdateReq{Folder: &folder}); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func TestClaudeSessionResumesWithinFolder(t *testing.T) {
+	p := &sessionProbe{mint: "sess-work"}
+	stubClaude(t, "claude", p.run)
+	store := newClaudeTestStore(t)
+	loadClaudeSessions(t.TempDir())
+	a := noteInFolder(t, store, "One", "work")
+	b := noteInFolder(t, store, "Two", "work")
+	h := claudeChatHandler(store)
+
+	postChat(t, h, `{"message":"hi","noteId":"`+a.ID+`"}`)
+	postChat(t, h, `{"message":"again","noteId":"`+a.ID+`"}`)
+	postChat(t, h, `{"message":"other note","noteId":"`+b.ID+`"}`) // same folder, no relaunch
+
+	want := []string{"", "sess-work", "sess-work"}
+	if !reflect.DeepEqual(p.resumes, want) {
+		t.Errorf("resume ids = %v, want %v", p.resumes, want)
+	}
+}
+
+func TestClaudeSessionDoesNotCrossFolders(t *testing.T) {
+	p := &sessionProbe{mint: "sess-a"}
+	stubClaude(t, "claude", p.run)
+	store := newClaudeTestStore(t)
+	loadClaudeSessions(t.TempDir())
+	a := noteInFolder(t, store, "A", "alpha")
+	b := noteInFolder(t, store, "B", "beta")
+	h := claudeChatHandler(store)
+
+	postChat(t, h, `{"message":"hi","noteId":"`+a.ID+`"}`) // fresh -> sess-a
+	p.mint = "sess-b"
+	postChat(t, h, `{"message":"hi","noteId":"`+b.ID+`"}`) // different folder -> fresh
+	postChat(t, h, `{"message":"back","noteId":"`+a.ID+`"}`)
+
+	want := []string{"", "", "sess-a"} // alpha's conversation survives the detour
+	if !reflect.DeepEqual(p.resumes, want) {
+		t.Errorf("resume ids = %v, want %v", p.resumes, want)
+	}
+	if got := claudeSessionFor("beta"); got != "sess-b" {
+		t.Errorf("beta session = %q, want sess-b", got)
+	}
+}
+
+func TestClaudeSessionCycledOutStartsFresh(t *testing.T) {
+	p := &sessionProbe{mint: "sess-old"}
+	stubClaude(t, "claude", p.run)
+	store := newClaudeTestStore(t)
+	loadClaudeSessions(t.TempDir())
+	n := noteInFolder(t, store, "N", "work")
+	h := claudeChatHandler(store)
+
+	postChat(t, h, `{"message":"hi","noteId":"`+n.ID+`"}`)
+	p.gone, p.mint = true, "sess-new" // the CLI pruned the transcript
+	rec := postChat(t, h, `{"message":"still there?","noteId":"`+n.ID+`"}`)
+
+	evs := sseEvents(t, rec.Body.String())
+	if last := evs[len(evs)-1]; last.Type != "done" {
+		t.Fatalf("expired session should recover silently, last event = %+v", last)
+	}
+	want := []string{"", "sess-old", ""} // tried the dead id, then retried fresh
+	if !reflect.DeepEqual(p.resumes, want) {
+		t.Errorf("resume ids = %v, want %v", p.resumes, want)
+	}
+	if got := claudeSessionFor("work"); got != "sess-new" {
+		t.Errorf("session after recovery = %q, want sess-new", got)
+	}
+}
+
+func TestClaudeSessionResetStartsNewConversation(t *testing.T) {
+	p := &sessionProbe{mint: "sess-1"}
+	stubClaude(t, "claude", p.run)
+	store := newClaudeTestStore(t)
+	loadClaudeSessions(t.TempDir())
+	n := noteInFolder(t, store, "N", "work")
+	h := claudeChatHandler(store)
+
+	postChat(t, h, `{"message":"hi","noteId":"`+n.ID+`"}`)
+	p.mint = "sess-2"
+	postChat(t, h, `{"message":"clean slate","noteId":"`+n.ID+`","reset":true}`)
+	postChat(t, h, `{"message":"and on","noteId":"`+n.ID+`"}`)
+
+	want := []string{"", "", "sess-2"}
+	if !reflect.DeepEqual(p.resumes, want) {
+		t.Errorf("resume ids = %v, want %v", p.resumes, want)
+	}
+}
+
+func TestClaudeSessionsPersistAcrossRestart(t *testing.T) {
+	p := &sessionProbe{mint: "sess-keep"}
+	stubClaude(t, "claude", p.run)
+	store := newClaudeTestStore(t)
+	dir := t.TempDir()
+	loadClaudeSessions(dir)
+	n := noteInFolder(t, store, "N", "work")
+	postChat(t, claudeChatHandler(store), `{"message":"hi","noteId":"`+n.ID+`"}`)
+
+	loadClaudeSessions(dir) // simulate a restart against the same sidecar
+	if got := claudeSessionFor("work"); got != "sess-keep" {
+		t.Errorf("session after reload = %q, want sess-keep", got)
+	}
+}
+
+// The CLI reports a pruned transcript inside the result frame when it is
+// streaming, not just on stderr — parse it so the resume fallback can see it.
+func TestParseClaudeStreamCapturesResultErrors(t *testing.T) {
+	const frame = `{"type":"result","subtype":"error_during_execution","is_error":true,` +
+		`"num_turns":0,"session_id":"00000000-0000-0000-0000-000000000000",` +
+		`"errors":["No conversation found with session ID: 00000000-0000-0000-0000-000000000000"]}`
+	var emitted []string
+	res := parseClaudeStream(strings.NewReader(frame+"\n"), func(s string) { emitted = append(emitted, s) })
+	if !res.sawResult || !res.isError {
+		t.Fatalf("res = %+v, want a terminal error", res)
+	}
+	if !sessionMissing(res.errs) {
+		t.Errorf("errs = %q, want the missing-session marker", res.errs)
+	}
+	if len(emitted) != 0 {
+		t.Errorf("a failed resume streamed %v, want nothing (retry would double-print)", emitted)
 	}
 }

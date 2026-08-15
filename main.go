@@ -20,7 +20,7 @@ import (
 )
 
 // a var so test builds can override it with -ldflags "-X main.version=..."
-var version = "1.6.7"
+var version = "1.6.8"
 
 //go:embed all:ui
 var uiEmbed embed.FS
@@ -55,7 +55,8 @@ func main() {
 	if err := os.MkdirAll(notesDir, 0o755); err != nil {
 		log.Fatal(err)
 	}
-	loadClaudeConfig(notesDir) // claude exe/settings overrides + activity log
+	loadClaudeConfig(notesDir)   // claude exe/settings overrides + activity log
+	loadClaudeSessions(notesDir) // per-folder chat conversations to --resume
 
 	store, err := NewStore(notesDir)
 	if err != nil {

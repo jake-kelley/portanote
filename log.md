@@ -2,6 +2,7 @@
 
 Release history, newest first. Full diffs live in the [GitHub releases](https://github.com/jake-kelley/portanote/releases).
 
+- **2026-08-14 — v1.6.8**: Ask Claude remembers the conversation. Context now carries from message to message instead of every question starting over, scoped to the open note's folder — notes in the same folder share a thread, a note in another folder gets its own, and a folder's conversation resumes when you return to it.
 - **2026-07-20 — v1.6.7**: folder rename in the sidebar (pencil button; double-click still works) and a rename_folder MCP tool that renames or moves whole subtrees.
 - **2026-07-15 — v1.6.6**: frontmatter Portanote doesn't own is preserved on save; block-form (Obsidian-style) tags are read instead of emptied.
 - **2026-07-15 — v1.6.5**: configurable update repository — pull releases from your own fork or a self-managed GitLab instance.
