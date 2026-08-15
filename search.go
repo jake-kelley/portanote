@@ -2,6 +2,7 @@ package main
 
 import (
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -16,6 +17,7 @@ type Index struct {
 	docTerms map[string]map[string]float64 // docID -> its terms (for removal)
 	docLen   map[string]float64
 	totalLen float64
+	terms    []string // vocabulary, sorted — prefix lookup without scanning postings
 }
 
 func NewIndex() *Index {
@@ -23,6 +25,22 @@ func NewIndex() *Index {
 		postings: map[string]map[string]float64{},
 		docTerms: map[string]map[string]float64{},
 		docLen:   map[string]float64{},
+	}
+}
+
+// addTerm/dropTerm keep ix.terms sorted alongside ix.postings. Vocabulary
+// churns far less than the postings do — only a genuinely new word inserts,
+// and only the last document to use a word removes it — so the O(n) shift is
+// paid rarely, in exchange for prefix lookups that never scan the vocabulary.
+func (ix *Index) addTerm(t string) {
+	i := sort.SearchStrings(ix.terms, t)
+	ix.terms = slices.Insert(ix.terms, i, t)
+}
+
+func (ix *Index) dropTerm(t string) {
+	i := sort.SearchStrings(ix.terms, t)
+	if i < len(ix.terms) && ix.terms[i] == t {
+		ix.terms = slices.Delete(ix.terms, i, i+1)
 	}
 }
 
@@ -53,6 +71,7 @@ func (ix *Index) Put(id, title string, tags []string, body string) {
 		if !ok {
 			m = map[string]float64{}
 			ix.postings[t] = m
+			ix.addTerm(t)
 		}
 		m[id] = w
 		dl += w
@@ -71,6 +90,7 @@ func (ix *Index) Remove(id string) {
 		delete(ix.postings[t], id)
 		if len(ix.postings[t]) == 0 {
 			delete(ix.postings, t)
+			ix.dropTerm(t)
 		}
 	}
 	ix.totalLen -= ix.docLen[id]
@@ -94,23 +114,15 @@ func (ix *Index) Search(q string) map[string]float64 {
 
 	for i, term := range qTerms {
 		// the token still being typed also matches as a prefix
-		expansions := [][2]interface{}{}
-		if m, ok := ix.postings[term]; ok {
-			expansions = append(expansions, [2]interface{}{term, m})
+		var expansions []string
+		if _, ok := ix.postings[term]; ok {
+			expansions = append(expansions, term)
 		}
 		if i == len(qTerms)-1 {
-			count := 0
-			for vocab, m := range ix.postings {
-				if vocab != term && strings.HasPrefix(vocab, term) {
-					expansions = append(expansions, [2]interface{}{vocab, m})
-					if count++; count >= 40 {
-						break
-					}
-				}
-			}
+			expansions = append(expansions, ix.prefixMatches(term)...)
 		}
 		for _, ex := range expansions {
-			m := ex[1].(map[string]float64)
+			m := ix.postings[ex]
 			df := float64(len(m))
 			idf := math.Log(1 + (n-df+0.5)/(df+0.5))
 			for id, tf := range m {
@@ -120,6 +132,37 @@ func (ix *Index) Search(q string) map[string]float64 {
 		}
 	}
 	return scores
+}
+
+// how many vocabulary words one half-typed token may expand to
+const prefixExpansionMax = 40
+
+// prefixMatches returns vocabulary terms beginning with prefix, excluding an
+// exact match (the caller scores that separately). Binary search finds the
+// range, so cost scales with the number of matches rather than the size of the
+// vocabulary.
+//
+// When more than prefixExpansionMax match, the most widely used words win, ties
+// broken alphabetically. Any rule would do; having one is the point. This
+// previously ranged over the postings map and stopped at 40, and Go randomizes
+// map order — so the same query could return different results each time it ran.
+func (ix *Index) prefixMatches(prefix string) []string {
+	var hits []string
+	for _, t := range ix.terms[sort.SearchStrings(ix.terms, prefix):] {
+		if !strings.HasPrefix(t, prefix) {
+			break
+		}
+		if t != prefix {
+			hits = append(hits, t)
+		}
+	}
+	if len(hits) <= prefixExpansionMax {
+		return hits
+	}
+	sort.SliceStable(hits, func(a, b int) bool {
+		return len(ix.postings[hits[a]]) > len(ix.postings[hits[b]])
+	})
+	return hits[:prefixExpansionMax]
 }
 
 func tokenize(s string) []string {

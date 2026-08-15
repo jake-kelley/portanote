@@ -501,7 +501,10 @@ func (s *Store) Search(q string, includeTrashed bool) []SearchResult {
 		if results[i].Score != results[j].Score {
 			return results[i].Score > results[j].Score
 		}
-		return results[i].Updated.After(results[j].Updated)
+		if !results[i].Updated.Equal(results[j].Updated) {
+			return results[i].Updated.After(results[j].Updated)
+		}
+		return results[i].ID < results[j].ID // notes saved in the same instant still rank the same way twice
 	})
 	if len(results) > 200 {
 		results = results[:200]
