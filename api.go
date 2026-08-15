@@ -239,6 +239,7 @@ func newAPI(store *Store, uiFS fs.FS) http.Handler {
 	mux.HandleFunc("POST /api/claude/stop", claudeStopHandler)
 	mux.HandleFunc("GET /api/claude/config", claudeConfigHandler)
 	mux.HandleFunc("PUT /api/claude/config", claudeConfigHandler)
+	mux.HandleFunc("GET /api/claude/session", claudeSessionHandler)
 	mux.HandleFunc("GET /api/claude/logs", claudeLogsHandler)
 	mux.HandleFunc("POST /api/claude/logs/clear", claudeLogsClearHandler)
 

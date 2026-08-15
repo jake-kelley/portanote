@@ -22,6 +22,7 @@ package main
 
 import (
 	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -86,6 +87,15 @@ func claudeSessionRecord(folder, id string) {
 	}
 	claudeSessions.byFolder[folder] = id
 	saveClaudeSessionsLocked()
+}
+
+// claudeSessionHandler answers whether a folder already has a conversation, so
+// the drawer can say "resumed" instead of announcing a fresh start every time
+// the open note moves between folders. Only the existence of the id is exposed;
+// the id itself is machine-local scratch the UI has no use for.
+func claudeSessionHandler(w http.ResponseWriter, r *http.Request) {
+	folder := r.URL.Query().Get("folder") // "" is the root folder, a real key
+	writeJSON(w, http.StatusOK, map[string]bool{"active": claudeSessionFor(folder) != ""})
 }
 
 // claudeSessionDrop forgets a folder's conversation: the CLI pruned it, or the

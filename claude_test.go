@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -702,6 +703,39 @@ func TestClaudeSessionsPersistAcrossRestart(t *testing.T) {
 	loadClaudeSessions(dir) // simulate a restart against the same sidecar
 	if got := claudeSessionFor("work"); got != "sess-keep" {
 		t.Errorf("session after reload = %q, want sess-keep", got)
+	}
+}
+
+// The drawer asks whether a folder already has a conversation so it can say
+// "resumed" instead of announcing a fresh start on every folder switch.
+func TestClaudeSessionHandlerReportsActive(t *testing.T) {
+	p := &sessionProbe{mint: "sess-active"}
+	stubClaude(t, "claude", p.run)
+	store := newClaudeTestStore(t)
+	loadClaudeSessions(t.TempDir())
+
+	ask := func(folder string) bool {
+		t.Helper()
+		req := httptest.NewRequest("GET", "/api/claude/session?folder="+url.QueryEscape(folder), nil)
+		rec := httptest.NewRecorder()
+		claudeSessionHandler(rec, req)
+		var out struct {
+			Active bool `json:"active"`
+		}
+		json.Unmarshal(rec.Body.Bytes(), &out)
+		return out.Active
+	}
+
+	if ask("work") {
+		t.Error("folder with no conversation reported active")
+	}
+	n := noteInFolder(t, store, "N", "work")
+	postChat(t, claudeChatHandler(store), `{"message":"hi","noteId":"`+n.ID+`"}`)
+	if !ask("work") {
+		t.Error("folder with a conversation reported inactive")
+	}
+	if ask("personal") {
+		t.Error("a sibling folder's conversation leaked")
 	}
 }
 

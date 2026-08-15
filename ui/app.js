@@ -1439,16 +1439,36 @@ function claudeClearThread() {
 }
 
 // Conversations are scoped to a folder: notes in the same folder keep rolling
-// context, a note in a different folder starts its own. The backend keys the
-// session the same way — this only keeps the visible thread honest about it.
-function claudeNoteChanged() {
+// context, a note in a different folder switches to that folder's own. The
+// backend keys the session the same way — this only keeps the visible thread
+// honest about it. The thread always clears, because past messages live in the
+// CLI's transcript and we have nothing to replay; saying so matters, or a
+// resumed conversation looks identical to a brand new one.
+async function claudeNoteChanged() {
   const folder = state.current ? (state.current.folder || "") : null;
   if (folder === null || folder === state.claudeFolder) return;
   const had = state.claudeFolder !== null && !$("#claudeThread").querySelector(".cl-empty");
   state.claudeFolder = folder;
+  // a pending 🗑 belongs to the folder it was clicked in, not this one
+  state.claudeReset = false;
   if (state.claudeStreaming) return;
   $("#claudeThread").innerHTML = CLAUDE_EMPTY;
-  if (had) claudeAppendMessage("cl-system", "New folder — starting a fresh conversation.");
+
+  let active = false;
+  try {
+    const r = await fetch("/api/claude/session?folder=" + encodeURIComponent(folder));
+    active = (await r.json()).active;
+  } catch {
+    return; // offline or mid-shutdown: say nothing rather than guess wrong
+  }
+  if (state.claudeFolder !== folder) return; // switched again while we asked
+
+  if (active) {
+    claudeAppendMessage("cl-system",
+      "Resumed this folder's conversation — earlier messages aren't shown here, but Claude still has them.");
+  } else if (had) {
+    claudeAppendMessage("cl-system", "New folder — starting a fresh conversation.");
+  }
 }
 
 // append a message to the thread and return its element (html must be safe)
