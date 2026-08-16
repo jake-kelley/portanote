@@ -35,7 +35,10 @@
         <a data-view="trash"><span class="vicon">🗑️</span>Trash<span class="count" id="cTrash"></span></a>
       </nav>
       <div class="side-section side-head-row">Folders
-        <button class="add-btn" id="newFolderBtn" title="New folder">+</button>
+        <span class="side-head-actions">
+          <button class="add-btn" id="importBtn" title="Import notes">📥</button>
+          <button class="add-btn" id="newFolderBtn" title="New folder">+</button>
+        </span>
       </div>
       <nav id="folderlist"></nav>
       <div class="side-section">Tags</div>
@@ -152,6 +155,7 @@
           <button id="starBtn" title="Star">☆</button>
           <button id="taskFromNoteBtn" title="Create a to-do task from this note">☑</button>
           <button id="claudeBtn" title="Ask Claude about this note" hidden>✳</button>
+          <button id="shareBtn" title="Share this note">📤</button>
           <details id="exportMenu">
             <summary title="Export">⤓</summary>
             <div class="menu">
@@ -360,5 +364,59 @@
     </div>
   </div>
 </div>
+
+<div id="shareOverlay" hidden>
+  <div class="modal-card" role="dialog" aria-label="Share note">
+    <header class="cheat-head">
+      <h2>Share</h2>
+      <button id="shareClose" title="Close (Esc)">✕</button>
+    </header>
+    <div class="settings-body" id="shareBody"></div>
+  </div>
+</div>
+
+<div id="importOverlay" hidden>
+  <div class="modal-card import-card" role="dialog" aria-label="Import notes">
+    <header class="cheat-head">
+      <h2>Import</h2>
+      <button id="importClose" title="Close (Esc)">✕</button>
+    </header>
+    <div class="settings-body">
+      <div id="importDrop" class="import-drop">
+        <p><b>Drop</b> a <code>.portanote</code> bundle, markdown files, or a whole folder here</p>
+        <p class="import-drop-sub">— or —</p>
+        <div class="import-drop-actions">
+          <button id="importPickFiles" class="btn-secondary" type="button">Choose files…</button>
+          <button id="importPickFolder" class="btn-secondary" type="button">Choose folder…</button>
+        </div>
+        <input type="file" id="importFileInput" multiple accept=".md,.portanote" hidden>
+        <input type="file" id="importFolderInput" webkitdirectory multiple hidden>
+      </div>
+      <div id="importFileList" class="import-file-list"></div>
+
+      <label class="setting-row col">Or paste a <code>portanote1:</code> share code
+        <textarea id="importCodeInput" rows="2" spellcheck="false" autocomplete="off" placeholder="portanote1:…"></textarea>
+      </label>
+
+      <div id="importPreview" class="import-preview"></div>
+
+      <label class="setting-row col">Import into
+        <select id="importFolderSel"></select>
+        <input id="importNewFolderInput" type="text" placeholder="New folder path (use / to nest)" hidden autocomplete="off">
+      </label>
+
+      <div id="importProgress" class="import-progress" hidden>
+        <div class="import-progress-bar" id="importProgressBar"></div>
+      </div>
+      <div class="settings-status" id="importStatus"></div>
+      <div class="settings-actions">
+        <button id="importCancelBtn" class="btn-secondary">Cancel</button>
+        <button id="importConfirmBtn" class="btn-primary" disabled>Import</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toastHost"></div>
 </body>
 </html>

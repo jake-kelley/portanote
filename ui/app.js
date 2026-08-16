@@ -37,7 +37,14 @@ const state = {
   claudeAtBottom: true,     // auto-scroll the thread unless the user scrolled up
   aiTags: null,             // {id, tags} — last AI tag suggestions; override the built-in ones
   aiTagsBusy: false,        // a per-note or bulk AI tag run is in flight
+  importFiles: [],          // [{file, relPath}] queued for the Import modal
+  importCode: "",           // pasted portanote1: code in the Import modal
+  importPreview: null,      // last /api/import/preview response
+  importPreviewTimer: null,
+  importBusy: false,        // an /api/import upload is in flight
 };
+
+const RESERVED_FOLDERS = ["attachments", "templates", "backups"]; // server-reserved, never importable into
 
 /* ---------------------------------------------------------------- init */
 
@@ -112,6 +119,22 @@ function fmtDate(iso, withTime = false) {
 
 function esc(s) {
   return (s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function fmtBytes(n) {
+  n = n || 0;
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1).replace(/\.0$/, "") + " KB";
+  return (n / (1024 * 1024)).toFixed(1).replace(/\.0$/, "") + " MB";
+}
+
+// small floating notifications — cls "" (info) or "error"
+function toast(msg, cls = "") {
+  const el = document.createElement("div");
+  el.className = "toast" + (cls ? " " + cls : "");
+  el.textContent = msg;
+  $("#toastHost").appendChild(el);
+  setTimeout(() => el.remove(), cls === "error" ? 7000 : 4500);
 }
 
 function highlight(text, q) {
@@ -1395,6 +1418,264 @@ async function exportEisvogel() {
   }
 }
 
+/* ---------------------------------------------------------------- share */
+/* POST /api/share/{id} — server picks "code" (small/no attachments) or "file"
+   (bundle + best-effort OS clipboard) mode by attachment size. */
+async function openShare() {
+  const n = state.current;
+  if (!n) return;
+  if (state.dirty) await saveNow();
+  let data;
+  try {
+    const r = await fetch("/api/share/" + encodeURIComponent(n.id), { method: "POST" });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      toast("Share failed: " + (err.error || r.statusText), "error");
+      return;
+    }
+    data = await r.json();
+  } catch (e) {
+    toast("Share failed: " + e, "error");
+    return;
+  }
+  const count = `${data.notes} note${data.notes === 1 ? "" : "s"}, ${data.attachments} attachment${data.attachments === 1 ? "" : "s"} (${fmtBytes(data.bytes)})`;
+  if (data.mode === "code") {
+    let copied = false;
+    try { await navigator.clipboard.writeText(data.code); copied = true; } catch {}
+    toast(copied ? `Share code copied — ${count}` : `Share code ready — clipboard blocked, copy it from the dialog (${count})`,
+      copied ? "" : "error");
+  } else {
+    toast(data.clipboard ? `Bundle copied to clipboard — paste into Teams to attach (${count})`
+      : `Bundle ready — clipboard copy failed, download it instead (${count})`, data.clipboard ? "" : "error");
+  }
+  openShareDialog(data, count);
+}
+
+function openShareDialog(data, count) {
+  const body = $("#shareBody");
+  if (data.mode === "code") {
+    body.innerHTML = `
+      <p class="settings-desc">${esc(count)} — copy this code and paste it wherever you like. Portanote can import it back later.</p>
+      <textarea id="shareCodeText" class="share-code" readonly spellcheck="false"></textarea>
+      <div class="settings-actions">
+        <button id="shareCopyBtn" class="btn-primary">Copy code</button>
+      </div>`;
+    $("#shareCodeText").value = data.code;
+  } else {
+    body.innerHTML = `
+      <p class="settings-desc">${esc(count)} — <code>${esc(data.filename)}</code>${data.clipboard ? " is already on your clipboard." : " — clipboard copy failed."}</p>
+      <div class="settings-actions">
+        <a id="shareDownloadLink" class="btn-primary" href="/api/share/${encodeURIComponent(state.current.id)}/file" download="${esc(data.filename)}">⤓ Download</a>
+      </div>`;
+  }
+  $("#shareOverlay").hidden = false;
+}
+
+/* ---------------------------------------------------------------- import */
+/* One drop zone -> POST /api/import/preview as the user adds files/code,
+   then POST /api/import once a destination folder is chosen. */
+function isReservedFolder(path) {
+  return RESERVED_FOLDERS.includes((path || "").split("/")[0].toLowerCase());
+}
+
+function openImport() {
+  state.importFiles = [];
+  state.importCode = "";
+  state.importPreview = null;
+  $("#importCodeInput").value = "";
+  $("#importPreview").innerHTML = "";
+  $("#importStatus").textContent = "";
+  $("#importProgress").hidden = true;
+  $("#importProgressBar").style.width = "0%";
+  $("#importConfirmBtn").disabled = true;
+  $("#importCancelBtn").disabled = false;
+  renderImportFileList();
+  renderImportFolderSel();
+  $("#importOverlay").hidden = false;
+}
+
+function closeImport() {
+  $("#importOverlay").hidden = true;
+}
+
+function renderImportFolderSel() {
+  const opts = [`<option value="">(top level)</option>`];
+  for (const f of folderOrder()) {
+    const indent = "  ".repeat(f.depth);
+    opts.push(`<option value="${esc(f.path)}">${indent}${esc(f.name)}</option>`);
+  }
+  opts.push(`<option value="__new__">+ New folder…</option>`);
+  $("#importFolderSel").innerHTML = opts.join("");
+  $("#importNewFolderInput").hidden = true;
+}
+
+function renderImportFileList() {
+  const box = $("#importFileList");
+  if (!state.importFiles.length) { box.innerHTML = ""; return; }
+  box.innerHTML = `${state.importFiles.length} file${state.importFiles.length === 1 ? "" : "s"} queued
+    <button id="importClearFiles" class="import-clear" type="button">Clear</button>`;
+}
+
+function addImportFiles(entries) {
+  if (!entries.length) return;
+  state.importFiles.push(...entries);
+  renderImportFileList();
+  runImportPreview();
+}
+
+// walk a dropped DataTransferItem (file or, for a folder drop, its tree) into {file, relPath} entries
+function walkEntry(entry, prefix, out) {
+  return new Promise((resolve) => {
+    if (!entry) { resolve(); return; }
+    if (entry.isFile) {
+      entry.file((file) => { out.push({ file, relPath: prefix + entry.name }); resolve(); }, resolve);
+    } else if (entry.isDirectory) {
+      const reader = entry.createReader();
+      const readBatch = () => {
+        reader.readEntries((batch) => {
+          if (!batch.length) { resolve(); return; }
+          Promise.all(batch.map((e) => walkEntry(e, prefix + entry.name + "/", out))).then(readBatch);
+        }, resolve);
+      };
+      readBatch();
+    } else resolve();
+  });
+}
+
+async function collectDroppedFiles(dataTransfer) {
+  const items = dataTransfer.items ? [...dataTransfer.items] : [];
+  const hasEntries = items.length && items.every((it) => it.webkitGetAsEntry);
+  if (hasEntries) {
+    const out = [];
+    await Promise.all(items.map((it) => walkEntry(it.webkitGetAsEntry(), "", out)));
+    return out;
+  }
+  return [...dataTransfer.files].map((f) => ({ file: f, relPath: f.webkitRelativePath || f.name }));
+}
+
+async function runImportPreview() {
+  if (!state.importFiles.length && !state.importCode.trim()) {
+    $("#importPreview").innerHTML = "";
+    $("#importConfirmBtn").disabled = true;
+    return;
+  }
+  $("#importStatus").textContent = "Checking…";
+  try {
+    const fd = new FormData();
+    for (const { file, relPath } of state.importFiles) fd.append("files[]", file, relPath);
+    if (state.importCode.trim()) fd.append("code", state.importCode.trim());
+    const r = await fetch("/api/import/preview", { method: "POST", body: fd });
+    $("#importStatus").textContent = "";
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      toast("Import preview failed: " + (err.error || r.statusText), "error");
+      $("#importConfirmBtn").disabled = true;
+      return;
+    }
+    state.importPreview = await r.json();
+    renderImportPreview(state.importPreview);
+  } catch (e) {
+    $("#importStatus").textContent = "";
+    toast("Import preview failed: " + e, "error");
+    $("#importConfirmBtn").disabled = true;
+  }
+}
+
+function renderImportPreview(data) {
+  const box = $("#importPreview");
+  const items = data.items || [];
+  const topWarnings = (data.warnings || []).map((w) => `<div class="import-warn">⚠ ${esc(w)}</div>`).join("");
+  if (!items.length) {
+    box.innerHTML = topWarnings;
+    $("#importConfirmBtn").disabled = true;
+    return;
+  }
+  box.innerHTML = items.map((it) => `
+    <div class="import-item">
+      <div class="import-item-top">
+        <b>${esc(it.title || "Untitled")}</b>
+        <span class="import-item-meta">${it.attachments || 0} attachment${it.attachments === 1 ? "" : "s"} · ${fmtBytes(it.bytes)}</span>
+      </div>
+      <div class="import-item-tags">
+        ${(it.tags || []).map((t) => `<span class="chip">${esc(t)}</span>`).join("")}
+        ${it.folder ? `<span class="chip chip-folder">${esc(it.folder)}</span>` : ""}
+      </div>
+      ${it.titleClash ? `<div class="import-warn">⚠ same title as an existing note here — both will be kept</div>` : ""}
+      ${(it.warnings || []).map((w) => `<div class="import-warn">⚠ ${esc(w)}</div>`).join("")}
+    </div>`).join("") + topWarnings;
+  $("#importConfirmBtn").disabled = false;
+}
+
+async function refreshAfterImport() {
+  const [notes, folders] = await Promise.all([
+    fetch("/api/notes").then((r) => r.json()),
+    fetch("/api/folders").then((r) => r.json()),
+  ]);
+  state.notes = notes;
+  state.folders = folders.map((f) => f.name);
+  if (state.q) await runSearch();
+  renderAll();
+}
+
+function confirmImport() {
+  if (state.importBusy) return;
+  const sel = $("#importFolderSel").value;
+  let folder = sel;
+  if (sel === "__new__") {
+    folder = $("#importNewFolderInput").value.trim();
+    if (!folder) { toast("Enter a folder name.", "error"); return; }
+  }
+  if (isReservedFolder(folder)) { toast(`"${folder.split("/")[0]}" is reserved and can't be used.`, "error"); return; }
+  if (!state.importFiles.length && !state.importCode.trim()) { toast("Nothing to import yet.", "error"); return; }
+
+  const fd = new FormData();
+  for (const { file, relPath } of state.importFiles) fd.append("files[]", file, relPath);
+  if (state.importCode.trim()) fd.append("code", state.importCode.trim());
+  fd.append("folder", folder);
+
+  state.importBusy = true;
+  $("#importConfirmBtn").disabled = true;
+  $("#importCancelBtn").disabled = true;
+  $("#importProgress").hidden = false;
+  $("#importProgressBar").style.width = "0%";
+  $("#importStatus").textContent = "Importing…";
+
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", "/api/import");
+  xhr.upload.addEventListener("progress", (e) => {
+    if (e.lengthComputable) $("#importProgressBar").style.width = Math.round((e.loaded / e.total) * 100) + "%";
+  });
+  xhr.onload = async () => {
+    state.importBusy = false;
+    $("#importCancelBtn").disabled = false;
+    $("#importProgress").hidden = true;
+    if (xhr.status >= 200 && xhr.status < 300) {
+      let data = {};
+      try { data = JSON.parse(xhr.responseText); } catch {}
+      const n = data.imported || 0;
+      toast(`Imported ${n} note${n === 1 ? "" : "s"}`);
+      if (data.warnings && data.warnings.length) toast(data.warnings.join(" · "), "error");
+      closeImport();
+      await refreshAfterImport();
+    } else {
+      let msg = xhr.statusText;
+      try { msg = JSON.parse(xhr.responseText).error || msg; } catch {}
+      toast("Import failed: " + msg, "error");
+      $("#importConfirmBtn").disabled = false;
+      $("#importStatus").textContent = "";
+    }
+  };
+  xhr.onerror = () => {
+    state.importBusy = false;
+    $("#importCancelBtn").disabled = false;
+    $("#importProgress").hidden = true;
+    $("#importConfirmBtn").disabled = false;
+    $("#importStatus").textContent = "";
+    toast("Import failed: network error", "error");
+  };
+  xhr.send(fd);
+}
+
 /* ---------------------------------------------------------------- ask claude */
 /* Right-hand drawer that talks to the local Claude Code CLI through the
    /api/claude endpoints. Each message is its own CLI process, but the backend
@@ -1749,6 +2030,57 @@ function bindEvents() {
   $("#newFolderBtn").addEventListener("click", () => createFolderFlow(false, ""));
   $("#folderSel").addEventListener("change", onFolderSelect);
 
+  // import modal
+  $("#importBtn").addEventListener("click", openImport);
+  $("#importClose").addEventListener("click", closeImport);
+  $("#importCancelBtn").addEventListener("click", closeImport);
+  $("#importOverlay").addEventListener("click", (e) => { if (e.target.id === "importOverlay") closeImport(); });
+  $("#importDrop").addEventListener("dragover", (e) => { e.preventDefault(); $("#importDrop").classList.add("drag"); });
+  $("#importDrop").addEventListener("dragleave", () => $("#importDrop").classList.remove("drag"));
+  $("#importDrop").addEventListener("drop", async (e) => {
+    e.preventDefault();
+    $("#importDrop").classList.remove("drag");
+    addImportFiles(await collectDroppedFiles(e.dataTransfer));
+  });
+  $("#importPickFiles").addEventListener("click", () => $("#importFileInput").click());
+  $("#importPickFolder").addEventListener("click", () => $("#importFolderInput").click());
+  $("#importFileInput").addEventListener("change", (e) => {
+    addImportFiles([...e.target.files].map((f) => ({ file: f, relPath: f.name })));
+    e.target.value = "";
+  });
+  $("#importFolderInput").addEventListener("change", (e) => {
+    addImportFiles([...e.target.files].map((f) => ({ file: f, relPath: f.webkitRelativePath || f.name })));
+    e.target.value = "";
+  });
+  $("#importFileList").addEventListener("click", (e) => {
+    if (e.target.id !== "importClearFiles") return;
+    state.importFiles = [];
+    renderImportFileList();
+    runImportPreview();
+  });
+  $("#importCodeInput").addEventListener("input", (e) => {
+    state.importCode = e.target.value;
+    clearTimeout(state.importPreviewTimer);
+    state.importPreviewTimer = setTimeout(runImportPreview, 400);
+  });
+  $("#importFolderSel").addEventListener("change", (e) => {
+    $("#importNewFolderInput").hidden = e.target.value !== "__new__";
+    if (e.target.value === "__new__") $("#importNewFolderInput").focus();
+  });
+  $("#importConfirmBtn").addEventListener("click", confirmImport);
+
+  // share modal
+  $("#shareBtn").addEventListener("click", openShare);
+  $("#shareClose").addEventListener("click", () => { $("#shareOverlay").hidden = true; });
+  $("#shareOverlay").addEventListener("click", (e) => { if (e.target.id === "shareOverlay") $("#shareOverlay").hidden = true; });
+  $("#shareBody").addEventListener("click", async (e) => {
+    if (e.target.id !== "shareCopyBtn") return;
+    const ta = $("#shareCodeText");
+    ta.select();
+    try { await navigator.clipboard.writeText(ta.value); } catch { document.execCommand("copy"); }
+    toast("Copied ✓");
+  });
+
   // list: click (open), Ctrl/Cmd+click (toggle), Shift+click (range)
   $("#notelist").addEventListener("click", (e) => {
     const item = e.target.closest(".note-item");
@@ -2001,6 +2333,8 @@ function bindEvents() {
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !$("#cheatOverlay").hidden) { $("#cheatOverlay").hidden = true; return; }
     if (e.key === "Escape" && !$("#settingsOverlay").hidden) { $("#settingsOverlay").hidden = true; return; }
+    if (e.key === "Escape" && !$("#shareOverlay").hidden) { $("#shareOverlay").hidden = true; return; }
+    if (e.key === "Escape" && !$("#importOverlay").hidden) { closeImport(); return; }
     const mod = e.ctrlKey || e.metaKey;
     if (mod && e.altKey && e.key.toLowerCase() === "n") { e.preventDefault(); newNote(); }
     else if (mod && e.key.toLowerCase() === "k") { e.preventDefault(); $("#search").focus(); $("#search").select(); }
