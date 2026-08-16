@@ -1478,6 +1478,27 @@ function isReservedFolder(path) {
   return RESERVED_FOLDERS.includes((path || "").split("/")[0].toLowerCase());
 }
 
+/* Preview and import send the same body, so they build it the same way.
+   Two things ride alongside the files rather than in them: relative paths,
+   because RFC 7578 forbids directory information in a part's filename and the
+   server strips it, so a dropped folder's shape would be lost; and
+   modification times, because a part carries no timestamp and a foreign
+   markdown file would otherwise import as created today. */
+function buildImportForm() {
+  const fd = new FormData();
+  const paths = [];
+  const mtimes = {};
+  for (const { file, relPath } of state.importFiles) {
+    fd.append("files[]", file, relPath);
+    paths.push(relPath);
+    if (file.lastModified) mtimes[relPath] = file.lastModified;
+  }
+  if (paths.length) fd.append("paths", JSON.stringify(paths));
+  if (Object.keys(mtimes).length) fd.append("mtimes", JSON.stringify(mtimes));
+  if (state.importCode.trim()) fd.append("code", state.importCode.trim());
+  return fd;
+}
+
 function openImport() {
   state.importFiles = [];
   state.importCode = "";
@@ -1561,10 +1582,7 @@ async function runImportPreview() {
   }
   $("#importStatus").textContent = "Checking…";
   try {
-    const fd = new FormData();
-    for (const { file, relPath } of state.importFiles) fd.append("files[]", file, relPath);
-    if (state.importCode.trim()) fd.append("code", state.importCode.trim());
-    const r = await fetch("/api/import/preview", { method: "POST", body: fd });
+    const r = await fetch("/api/import/preview", { method: "POST", body: buildImportForm() });
     $("#importStatus").textContent = "";
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
@@ -1628,9 +1646,7 @@ function confirmImport() {
   if (isReservedFolder(folder)) { toast(`"${folder.split("/")[0]}" is reserved and can't be used.`, "error"); return; }
   if (!state.importFiles.length && !state.importCode.trim()) { toast("Nothing to import yet.", "error"); return; }
 
-  const fd = new FormData();
-  for (const { file, relPath } of state.importFiles) fd.append("files[]", file, relPath);
-  if (state.importCode.trim()) fd.append("code", state.importCode.trim());
+  const fd = buildImportForm();
   fd.append("folder", folder);
 
   state.importBusy = true;

@@ -359,6 +359,9 @@ func newAPI(store *Store, uiFS fs.FS) http.Handler {
 		w.Write(pdf)
 	})
 
+	// share a note with another Portanote user, and import what they send back
+	registerShareRoutes(mux, store)
+
 	// print-to-PDF view (the zero-dependency export path)
 	mux.HandleFunc("GET /print/{id}", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFileFS(w, r, uiFS, "print.html")

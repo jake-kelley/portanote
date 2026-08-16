@@ -144,7 +144,8 @@ updated: 2026-07-05T04:35:21Z
 
 Three things make the folder genuinely shareable with other tools:
 
-- **Drop in existing Markdown and it just works.** Files without frontmatter are adopted as-is — title from the first heading, folder from the directory, timestamps from the file.
+- **Drop in existing Markdown and it just works.** Files without frontmatter are adopted as-is — title from the first heading, folder from the directory, timestamps from the file. The **Import** button does the same for files you haven't copied into the notes folder yourself, including a whole Obsidian folder with its images. ([Details →](docs/sharing.md))
+- **Share a note with someone else running Portanote.** **Share** gives you a code to paste into a chat, or a `.portanote` file when the note carries images — on Windows that file lands on your clipboard, so Ctrl+V attaches it in Teams. They import it into whatever folder they like. ([Details →](docs/sharing.md))
 - **Frontmatter Portanote doesn't recognize is left alone.** An Obsidian property, a Hugo `draft:`, your own script's field — preserved word for word on every save.
 - **Trash is a flag, not a folder.** Nothing is permanently deleted except "Delete forever" in the Trash view.
 
