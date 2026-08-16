@@ -1,3 +1,11 @@
+---
+type: Guide
+title: Sharing & importing notes
+description: Sending a note to another Portanote user as a share code or a .portanote bundle, and importing bundles, codes, foreign Markdown, or a whole dropped folder with its images.
+tags: [portanote, sharing, import, markdown, obsidian]
+timestamp: 2026-08-16T16:00:00-06:00
+---
+
 # Sharing and importing notes
 
 Send a note to someone else running Portanote, and bring notes in from anywhere
