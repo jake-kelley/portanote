@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 )
 
@@ -17,7 +18,7 @@ import (
 // tools/
 //   pandoc(.exe)
 //   tectonic(.exe)        <- single-binary LaTeX engine; downloads its LaTeX
-//                            packages to tools/tectonic-cache on first export
+//                            packages to tectonicCacheDir() on first export
 
 type ExportOpts struct {
 	TOC       bool
@@ -31,6 +32,29 @@ func exeDir() string {
 		return "."
 	}
 	return filepath.Dir(exe)
+}
+
+// tectonicCacheDir picks where tectonic keeps the ~100 MB LaTeX bundle it
+// downloads on first export.
+//
+// Everywhere but macOS that's tools/tectonic-cache next to the binary, so a
+// copy on a USB stick carries its own cache and stays portable. macOS is the
+// exception: the binary normally lives in ~/Documents, which is TCC-protected,
+// and tectonic is a separate unsigned binary with no access grant of its own.
+// Touching the cache there fails with EPERM and tectonic panics inside its
+// bundle detection — a bare Rust backtrace that says nothing about
+// permissions. ~/Library/Caches isn't protected, so the cache goes there and
+// stays behind on the host.
+func tectonicCacheDir() string {
+	portable := filepath.Join(exeDir(), "tools", "tectonic-cache")
+	if runtime.GOOS != "darwin" {
+		return portable
+	}
+	base, err := os.UserCacheDir()
+	if err != nil {
+		return portable
+	}
+	return filepath.Join(base, "Portanote", "tectonic")
 }
 
 func findTool(name string) string {
@@ -124,12 +148,22 @@ func ExportEisvogelPDF(n *Note, opts ExportOpts) ([]byte, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, pandoc, args...)
 	cmd.Dir = tmp
-	cmd.Env = append(os.Environ(),
-		"TECTONIC_CACHE_DIR="+filepath.Join(exeDir(), "tools", "tectonic-cache"))
+	cache := tectonicCacheDir()
+	_ = os.MkdirAll(cache, 0o755) // best effort; tectonic creates it too
+	cmd.Env = append(os.Environ(), "TECTONIC_CACHE_DIR="+cache)
 	if stderr, err := cmd.CombinedOutput(); err != nil {
 		msg := string(stderr)
 		if len(msg) > 2000 {
 			msg = "…" + msg[len(msg)-2000:]
+		}
+		// EPERM on macOS means TCC, not file modes, and neither pandoc nor
+		// tectonic says so — they just panic. Name it, or the next person
+		// spends an afternoon on it.
+		if runtime.GOOS == "darwin" && strings.Contains(msg, "Operation not permitted") {
+			msg += "\n\nmacOS denied access to a file this export needs. Add Portanote under" +
+				" System Settings → Privacy & Security → Files and Folders (or Full Disk Access)," +
+				" or move the portanote folder out of ~/Documents. A self-update can silently" +
+				" revoke a grant you gave an earlier build."
 		}
 		return nil, fmt.Errorf("pandoc failed: %v\n%s", err, msg)
 	}

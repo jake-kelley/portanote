@@ -89,7 +89,7 @@ iwr -useb https://raw.githubusercontent.com/jake-kelley/portanote/main/scripts/g
 curl -fsSL https://raw.githubusercontent.com/jake-kelley/portanote/main/scripts/get-tools.sh | sh
 ```
 
-(Both scripts are also attached to each [release](https://github.com/jake-kelley/portanote/releases/latest) if you'd rather download than pipe from the web.) The sidebar badge flips to **PDF: eisvogel** and the Eisvogel export options enable. The first export downloads ~100 MB of LaTeX packages into `tools/tectonic-cache/` and takes a few minutes; after that it's fast and works offline.
+(Both scripts are also attached to each [release](https://github.com/jake-kelley/portanote/releases/latest) if you'd rather download than pipe from the web.) The sidebar badge flips to **PDF: eisvogel** and the Eisvogel export options enable. The first export downloads ~100 MB of LaTeX packages and takes a few minutes; after that it's fast and works offline. They land in `tools/tectonic-cache/` — except on macOS, where they go to `~/Library/Caches/Portanote/tectonic` instead, because `~/Documents` is protected and macOS blocks the typesetter from writing there. If an export ever fails with `Operation not permitted`, that's macOS: add Portanote under **System Settings → Privacy & Security → Files and Folders**, or keep the folder outside `~/Documents`.
 
 ## Everyday use
 
