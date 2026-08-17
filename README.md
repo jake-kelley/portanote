@@ -107,6 +107,7 @@ curl -fsSL https://raw.githubusercontent.com/jake-kelley/portanote/main/scripts/
 | `Ctrl/⌘ + S` | Save now (autosave runs anyway) |
 | `Ctrl/⌘ + E` | Cycle edit / split / preview |
 | `Ctrl/⌘ + B` · `I` · `` ` `` · `L` | Bold · italic · code · link |
+| `Tab` · `Shift + Tab` | Indent / unindent every selected line (also `⇥` `⇤` on the toolbar) |
 | `Esc` | Clear search / close dialog |
 
 ## Your data

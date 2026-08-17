@@ -1335,6 +1335,43 @@ function mdLinePrefix(prefix) {
   onBodyInput();
 }
 
+/* Indent (dir 1) or unindent (dir -1) every line the selection touches.
+   Tab used to replace the selection outright, so highlighting a block and
+   pressing it deleted the block — the main thing this fixes. The whole block
+   stays selected afterwards so Tab can be pressed again to go deeper. */
+function mdIndent(dir) {
+  const ta = $("#mdtext");
+  const { selectionStart: s, selectionEnd: e, value: v } = ta;
+  const unit = "  ";
+
+  // a collapsed cursor indents in place, the way Tab does anywhere else
+  if (s === e && dir > 0) {
+    ta.setRangeText(unit, s, e, "end");
+    ta.focus();
+    onBodyInput();
+    return;
+  }
+
+  const ls = v.lastIndexOf("\n", s - 1) + 1;
+  const le = v.indexOf("\n", e) === -1 ? v.length : v.indexOf("\n", e);
+  const out = v.slice(ls, le).split("\n").map((l) => {
+    if (dir > 0) return l.trim() === "" ? l : unit + l; // don't pad blank lines
+    if (l.startsWith(unit)) return l.slice(unit.length);
+    if (l.startsWith("\t")) return l.slice(1);
+    return l.replace(/^ /, ""); // a single stray space still unindents
+  }).join("\n");
+
+  ta.setRangeText(out, ls, le, "end");
+  if (s === e) {
+    const c = Math.max(ls, s - ((le - ls) - out.length)); // follow the shifted line
+    ta.setSelectionRange(c, c);
+  } else {
+    ta.setSelectionRange(ls, ls + out.length);
+  }
+  ta.focus();
+  onBodyInput();
+}
+
 function mdInsertBlock(text) {
   const ta = $("#mdtext");
   ta.setRangeText(text, ta.selectionStart, ta.selectionEnd, "end");
@@ -1376,6 +1413,8 @@ function applyMd(kind) {
     case "ul":        return mdLinePrefix("- ");
     case "ol":        return mdLinePrefix("1. ");
     case "task":      return mdLinePrefix("- [ ] ");
+    case "indent":    return mdIndent(1);
+    case "outdent":   return mdIndent(-1);
     case "hr":        return mdInsertBlock("\n---\n");
     case "table":     return mdInsertBlock("\n| Column A | Column B |\n|----------|----------|\n| cell 1   | cell 2   |\n");
   }
@@ -2185,8 +2224,8 @@ function bindEvents() {
   $("#mdtext").addEventListener("keydown", (e) => {
     if (e.key === "Tab") {
       e.preventDefault();
-      $("#mdtext").setRangeText("  ", $("#mdtext").selectionStart, $("#mdtext").selectionEnd, "end");
-      onBodyInput();
+      mdIndent(e.shiftKey ? -1 : 1);
+      return;
     }
     if ((e.ctrlKey || e.metaKey) && !e.altKey) {
       const k = e.key.toLowerCase();
