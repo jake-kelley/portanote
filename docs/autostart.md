@@ -98,3 +98,5 @@ It now starts hidden at every login.
 It starts at login (and restarts if it ever crashes), with no terminal window.
 
 - **Stop & disable:** `launchctl unload ~/Library/LaunchAgents/com.portanote.app.plist`, then delete the plist.
+
+Running under a LaunchAgent means no terminal and no window, so anything macOS wants to ask you about has nowhere to appear — a denied file-access prompt just turns into a feature that quietly stops working. [docs/macos.md](macos.md) covers permissions, Gatekeeper quarantine, and the modern `launchctl bootout` / `bootstrap` / `kickstart` commands.

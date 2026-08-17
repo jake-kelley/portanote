@@ -59,7 +59,7 @@ Your browser opens `http://127.0.0.1:8737` — bookmark it. Notes live in `Docum
 The binary is fully portable — no setup, run it from anywhere (USB stick included) and a `notes/` folder appears next to it. Download it from the **[latest release](https://github.com/jake-kelley/portanote/releases/latest)**:
 
 - **Windows:** double-click [`portanote-windows-amd64.exe`](https://github.com/jake-kelley/portanote/releases/latest/download/portanote-windows-amd64.exe); your browser opens `http://127.0.0.1:8737`. If SmartScreen warns: **More info → Run anyway** (it's an unsigned binary, not malware).
-- **macOS:** download [`portanote-macos-arm64`](https://github.com/jake-kelley/portanote/releases/latest/download/portanote-macos-arm64), then in Terminal, in the binary's folder: `chmod +x portanote-macos-arm64 && xattr -d com.apple.quarantine portanote-macos-arm64 && ./portanote-macos-arm64`. If Gatekeeper objects: **System Settings → Privacy & Security → Open Anyway**.
+- **macOS:** download [`portanote-macos-arm64`](https://github.com/jake-kelley/portanote/releases/latest/download/portanote-macos-arm64), then in Terminal, in the binary's folder: `chmod +x portanote-macos-arm64 && xattr -d com.apple.quarantine portanote-macos-arm64 && ./portanote-macos-arm64`. If Gatekeeper objects: **System Settings → Privacy & Security → Open Anyway**. Permissions, quarantine, and LaunchAgent trouble are all covered in [docs/macos.md](docs/macos.md).
 
 ### After that
 
@@ -89,7 +89,7 @@ iwr -useb https://raw.githubusercontent.com/jake-kelley/portanote/main/scripts/g
 curl -fsSL https://raw.githubusercontent.com/jake-kelley/portanote/main/scripts/get-tools.sh | sh
 ```
 
-(Both scripts are also attached to each [release](https://github.com/jake-kelley/portanote/releases/latest) if you'd rather download than pipe from the web.) The sidebar badge flips to **PDF: eisvogel** and the Eisvogel export options enable. The first export downloads ~100 MB of LaTeX packages and takes a few minutes; after that it's fast and works offline. They land in `tools/tectonic-cache/` — except on macOS, where they go to `~/Library/Caches/Portanote/tectonic` instead, because `~/Documents` is protected and macOS blocks the typesetter from writing there. If an export ever fails with `Operation not permitted`, that's macOS: add Portanote under **System Settings → Privacy & Security → Files and Folders**, or keep the folder outside `~/Documents`.
+(Both scripts are also attached to each [release](https://github.com/jake-kelley/portanote/releases/latest) if you'd rather download than pipe from the web.) The sidebar badge flips to **PDF: eisvogel** and the Eisvogel export options enable. The first export downloads ~100 MB of LaTeX packages and takes a few minutes; after that it's fast and works offline. They land in `tools/tectonic-cache/` — except on macOS, where they go to `~/Library/Caches/Portanote/tectonic` instead, because `~/Documents` is protected and macOS blocks the typesetter from writing there. If an export fails with `Operation not permitted`, that's macOS privacy protection, not a bug — [docs/macos.md](docs/macos.md) has the fix.
 
 ## Everyday use
 
